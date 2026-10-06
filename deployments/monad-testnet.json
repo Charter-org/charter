@@ -1,0 +1,15 @@
+{
+  "network": "monad-testnet",
+  "chainId": 10143,
+  "Mandate": "0x44dB25DB3769b0712cd654cbF83636c267852f7b",
+  "deployTx": "0xe98e8966e67a77a05b9cb23d3bbd062a1cc7df7bc1cfec15f0d017668b3d9b76",
+  "deployer": "0xcB4071FFfe67a4F21AA218fBeCf6FC8c0Ee67fDD",
+  "agent": "0xcB4071FFfe67a4F21AA218fBeCf6FC8c0Ee67fDD",
+  "terms": { "maxLeverageBps": 20000, "maxSlippageBps": 50, "drawdownTriggerBps": 1000 },
+  "evidence": {
+    "allowlistKuruTx": "0x2be75e1ff9baec7685cf1b3b88c224a254aacea51a904d848053e35dd3f4d4b7",
+    "actWithinBoundsTx": "0x765f27ec106d800046b3ea08fea2aab21115005a495f49050663d5aad65ffb91",
+    "abstainTx": "0x5acca01741d72107379be9b500e653d5783cb88de249ca0052cff4e15b62b390",
+    "refusal": "act() at 2.50x leverage reverts LeverageExceeded (selector 0x6881ba1f)"
+  }
+}

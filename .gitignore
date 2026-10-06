@@ -1,0 +1,21 @@
+# Internal strategy & demo notes — the submission repo is PUBLIC to investor-judges.
+# Keep these out of the published history.
+*.local.md
+00-THE-PROJECT.md
+
+# Secrets / local env
+.env
+.env.*
+!.env.example
+
+# Node / build
+node_modules/
+dist/
+build/
+out/
+coverage/
+.DS_Store
+
+# Foundry
+cache/
+broadcast/
