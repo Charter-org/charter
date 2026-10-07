@@ -20,15 +20,18 @@ Built for the **Monad Metropolis Hackathon** — Track 01, Onchain Finance & Tra
 
 Spine live on **Monad testnet** (chainId 10143).
 
-- **`Mandate` contract:** [`0x44dB25DB3769b0712cd654cbF83636c267852f7b`](https://testnet.monadexplorer.com/address/0x44dB25DB3769b0712cd654cbF83636c267852f7b)
+- **`Mandate` contract:** [`0x564EFe00cfF81eaF6A65422758C27A0c89EAA648`](https://testnet.monadexplorer.com/address/0x564EFe00cfF81eaF6A65422758C27A0c89EAA648)
   — terms: max **2.00x** leverage · max **0.50%** slippage · hedge trigger at **10%** drawdown.
+- **Custody + execution:** the owner deposits capital into the mandate; the agent can only move it
+  through `executeSwap`, which measures the realized fill and **reverts the trade** if it breaches the
+  slippage floor. A breach undoes a real swap, not just a log row (`test/MandateExecution.t.sol`).
 - **Proven on-chain:** an in-bounds action and an abstention are recorded as `Decision` rows; an
-  attempt to exceed leverage (2.50x) **reverts** (`LeverageExceeded`). 8/8 local tests pass.
+  attempt to exceed leverage (2.50x) **reverts** (`LeverageExceeded`). 14/14 local tests pass.
 - Deployment + evidence tx hashes: `deployments/monad-testnet.json`. Venue constants: `config/monad.ts`.
 - Bounty adherence checklist: `BOUNTIES.md`.
 
-v1 is the validation + decision-log gate. Next: custody/execution wiring so a breach blocks a real
-Kuru trade (not just the log row), then the per-block agent loop and the Mera/AUSD surface.
+The custody gate is live and tested. Next: exercise the `executeSwap` refusal on-chain against a real
+Kuru router + price-source adapter, then the per-block agent loop and the Mera/AUSD mobile surface.
 
 ## Architecture (planned, spine-first)
 
