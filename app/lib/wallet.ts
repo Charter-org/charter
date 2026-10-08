@@ -14,9 +14,10 @@ import { HDKey } from "@scure/bip32";
 import { createWalletClient, http, type LocalAccount, type WalletClient } from "viem";
 import { monadTestnet } from "./tokens";
 
-// The RP id is the HTTPS host the passkeys are scoped to; it MUST match the app's associated-domains
-// (iOS apple-app-site-association / Android assetlinks.json) for on-device passkeys to work.
-export const RP = { id: "metropolis.xyz", name: "Metropolis" } as const;
+// The RP id is the HTTPS host the passkeys are scoped to; it MUST equal the domain that serves
+// /.well-known/assetlinks.json (Android) — i.e. your Vercel deploy of ../../passkey-site. Change
+// this string and the Vercel project name together.
+export const RP = { id: "metropolis-passkeys.vercel.app", name: "Metropolis" } as const;
 const EVM_PATH = "m/44'/60'/0'/0/0";
 
 export interface Wallet {
