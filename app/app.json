@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "Metropolis",
+    "slug": "metropolis",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "scheme": "metropolis",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "xyz.metropolis.app"
+    },
+    "android": {
+      "package": "xyz.metropolis.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#0B0D12",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": ["react-native-passkey"]
+  }
+}
