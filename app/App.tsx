@@ -68,7 +68,7 @@ export default function App() {
     <View style={styles.screen}>
       <StatusBar style="light" />
       <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.brand}>METROPOLIS</Text>
+        <Text style={styles.brand}>CHARTER</Text>
         <Text style={styles.tagline}>Automated investing, with a guarantee.</Text>
 
         {!wallet ? (

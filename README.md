@@ -1,4 +1,4 @@
-# METROPOLIS
+# CHARTER
 
 **A position manager that runs every block, bounded by a rule it cannot break.**
 

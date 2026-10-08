@@ -3,7 +3,7 @@
     "relation": ["delegate_permission/common.get_login_creds"],
     "target": {
       "namespace": "android_app",
-      "package_name": "xyz.metropolis.app",
+      "package_name": "xyz.charter.app",
       "sha256_cert_fingerprints": ["REPLACE_WITH_SHA256_FROM_EAS_CREDENTIALS"]
     }
   }

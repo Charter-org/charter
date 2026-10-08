@@ -17,7 +17,7 @@ import { monadTestnet } from "./tokens";
 // The RP id is the HTTPS host the passkeys are scoped to; it MUST equal the domain that serves
 // /.well-known/assetlinks.json (Android) — i.e. your Vercel deploy of ../../passkey-site. Change
 // this string and the Vercel project name together.
-export const RP = { id: "metropolis-passkeys.vercel.app", name: "Metropolis" } as const;
+export const RP = { id: "charter-passkeys.vercel.app", name: "Charter" } as const;
 const EVM_PATH = "m/44'/60'/0'/0/0";
 
 export interface Wallet {
@@ -41,7 +41,7 @@ function walletFromPrf(prfOutput: Uint8Array, credentialId: string): Wallet {
 
 /** First run: create a passkey and derive the account. One Face ID / biometric prompt. */
 export async function signUp(
-  user = { name: "metropolis", displayName: "Metropolis" },
+  user = { name: "charter", displayName: "Charter" },
 ): Promise<Wallet> {
   const r = await createPasskeyWithPrfOutput({ rp: RP, user, webAuthnClient: reactNativeWebAuthnClient });
   return walletFromPrf(r.prfOutput, r.credentialId);

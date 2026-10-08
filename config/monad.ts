@@ -1,4 +1,4 @@
-// Monad networks + Metropolis venue constants.
+// Monad networks + Charter venue constants.
 // Verified 2026-10-06 against official docs (Perpl api-docs, docs.kuru.io, Agora deployments,
 // Monad docs). Re-verify the Kuru pins before the final build: the SDK is "under active
 // development" and deployment addresses have drifted for other teams.

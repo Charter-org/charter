@@ -108,7 +108,7 @@ export async function enrollApiKey(args: {
       address: args.address,
       public_key: key.publicKeyHex,
       scope_mask: args.scopeMask ?? 3,
-      label: args.label ?? "metropolis",
+      label: args.label ?? "charter",
     }),
   });
   if (!payloadRes.ok) throw new Error(`payload ${payloadRes.status}: ${await payloadRes.text()}`);

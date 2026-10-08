@@ -1,18 +1,18 @@
 {
   "expo": {
-    "name": "Metropolis",
-    "slug": "metropolis",
+    "name": "Charter",
+    "slug": "charter",
     "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
-    "scheme": "metropolis",
+    "scheme": "charter",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "xyz.metropolis.app"
+      "bundleIdentifier": "xyz.charter.app"
     },
     "android": {
-      "package": "xyz.metropolis.app",
+      "package": "xyz.charter.app",
       "adaptiveIcon": {
         "backgroundColor": "#0B0D12",
         "foregroundImage": "./assets/android-icon-foreground.png",

@@ -26,7 +26,7 @@ const signTyped: SignTyped = async (td) => {
 
 console.log("wallet:", account.address, "\norigin:", ORIGIN);
 try {
-  const r = await enrollApiKey({ address: account.address, origin: ORIGIN, label: "metropolis-test", signTyped });
+  const r = await enrollApiKey({ address: account.address, origin: ORIGIN, label: "charter-test", signTyped });
   console.log("ENROLLED ✓ api_key:", String(r.apiKey).slice(0, 10) + "…", "\nsecret (persist):", r.privateKeyHex);
 } catch (e: any) {
   console.log("enrollment failed ->", e.message);

@@ -1,4 +1,4 @@
-# Metropolis — mobile app
+# Charter — mobile app
 
 Expo (React Native) app for the Agora "Best Mobile Trading App" track: passkey sign-in (Mera) →
 live AUSD balance → a real Perpl perp trade. One token, AUSD, serves both the displayed balance and

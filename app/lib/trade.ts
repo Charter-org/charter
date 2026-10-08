@@ -88,5 +88,5 @@ export async function openLong(wallet: Wallet, opts: { marketId: number; sizeSca
 
 /** Wallet-signed Ed25519 API-key enrollment (authenticated reads: account, positions, fills). */
 export async function enroll(wallet: Wallet, origin = "https://testnet.perpl.xyz"): Promise<EnrollResult> {
-  return enrollApiKey({ address: wallet.address, origin, label: "metropolis", signTyped: signTypedFor(wallet) });
+  return enrollApiKey({ address: wallet.address, origin, label: "charter", signTyped: signTypedFor(wallet) });
 }

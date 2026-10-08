@@ -13,7 +13,7 @@ cd ../passkey-site
 npx vercel --prod            # log in, accept defaults; framework = Other
 ```
 
-Name the project **metropolis-passkeys** so the domain is `metropolis-passkeys.vercel.app` — that
+Name the project **charter-passkeys** so the domain is `charter-passkeys.vercel.app` — that
 must equal `RP.id` in `lib/wallet.ts`. (Different name → edit `RP.id` to match.) Verify:
 
 ```
