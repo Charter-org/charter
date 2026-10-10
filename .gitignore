@@ -8,6 +8,8 @@
 .env.*
 !.env.example
 perpl-api-key-*.txt
+*.jks
+credentials.json
 
 # Node / build
 node_modules/
