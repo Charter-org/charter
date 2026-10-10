@@ -4,7 +4,7 @@
     "target": {
       "namespace": "android_app",
       "package_name": "xyz.charter.app",
-      "sha256_cert_fingerprints": ["REPLACE_WITH_SHA256_FROM_EAS_CREDENTIALS"]
+      "sha256_cert_fingerprints": ["5C:F3:94:74:A7:76:2E:54:97:65:A5:C4:F9:93:49:D0:2B:F0:BC:98:CA:C5:73:B7:B3:D2:9A:D3:0F:85:9A:8C"]
     }
   }
 ]
