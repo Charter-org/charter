@@ -1,13 +1,17 @@
-// Serve assetlinks with EXACTLY `Content-Type: application/json` (no charset). Vercel's static
-// handler appends `; charset=utf-8`, which GMS's on-device Digital Asset Links fetcher can reject
-// during passkey RP-ID validation (while the lenient public assetlinks:check API accepts it).
+// Serve assetlinks with EXACTLY `Content-Type: application/json` (no charset).
+// Android passkey RP-ID validation (GMS ValidateRpIdOperation) requires BOTH get_login_creds AND
+// handle_all_urls in one statement — with only get_login_creds it fails "[50152] RP ID cannot be
+// validated" even though the public assetlinks:check API passes (see category-labs/mera#351).
 export default function handler(req, res) {
   res.setHeader("Content-Type", "application/json");
   res.statusCode = 200;
   res.end(
     JSON.stringify([
       {
-        relation: ["delegate_permission/common.get_login_creds"],
+        relation: [
+          "delegate_permission/common.get_login_creds",
+          "delegate_permission/common.handle_all_urls",
+        ],
         target: {
           namespace: "android_app",
           package_name: "xyz.charter.app",
