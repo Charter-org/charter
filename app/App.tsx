@@ -59,11 +59,10 @@ export default function App() {
   }, [wallet]);
 
   const propose = (leverageBps: number) => async () => {
-    if (!wallet) return;
     setBusy(true);
     setMandateMsg(null);
     try {
-      const r = await proposeTrade(wallet, leverageBps);
+      const r = await proposeTrade(leverageBps);
       const x = (leverageBps / 10000).toFixed(2);
       setMandateMsg(
         r.allowed
