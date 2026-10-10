@@ -12,5 +12,10 @@
     "abstainTx": "0xf4748c945b1bda36402c73afe03ce5b89e03d024decdbd4f4d683722cdf7b4d6",
     "leverageRefusal": "act() at 2.50x leverage reverts LeverageExceeded (selector 0x6881ba1f)",
     "custodyNote": "This build adds fund custody + executeSwap, which reverts a real spot trade when the realized fill breaches the slippage floor (proven in test/MandateExecution.t.sol). Exercising that refusal on-chain needs test USDC, an allowlisted Kuru router call, and a deployed IPriceSource adapter — wired in the next phase."
+  },
+  "appMandate": {
+    "Mandate": "0x37a0873e8d04796F7D1991B18A23C9364b5107af",
+    "agent": "0xD3fD52C8449c7c5593A05374b3D82350c30DD7f0",
+    "note": "Mandate whose agent is the Charter app's passkey account. The mobile app simulates the agent proposing a trade (gas-free eth_call); a 3.00x long reverts LeverageExceeded (shown as 'Refused by your mandate'), a 1.50x long is allowed. See app/lib/mandate.ts."
   }
 }
