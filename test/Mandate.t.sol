@@ -78,4 +78,31 @@ contract MandateTest is Test {
         assertTrue(mandate.hedgeRequired(1_200));
         assertFalse(mandate.hedgeRequired(500));
     }
+
+    /// THE KILL SWITCH: owner pauses by zeroing the agent; the former agent can no longer act; owner resumes.
+    function test_pauseAgent_revokesThenRestores() public {
+        vm.prank(owner);
+        mandate.setAgent(address(0));
+
+        vm.prank(agent);
+        vm.expectRevert(Mandate.NotAgent.selector);
+        mandate.act(Mandate.Action.Rebalance, kuru, 15_000, 30);
+
+        vm.prank(owner);
+        mandate.setAgent(agent);
+
+        vm.prank(agent);
+        assertEq(mandate.act(Mandate.Action.Rebalance, kuru, 15_000, 30), 1);
+    }
+
+    /// Owner adjusts the limits live; the new bound is enforced immediately.
+    function test_ownerUpdatesTerms_newBoundEnforced() public {
+        vm.prank(owner);
+        mandate.setTerms(Mandate.Terms({maxLeverageBps: 10_000, maxSlippageBps: 50, drawdownTriggerBps: 1_000}));
+
+        // 1.5x was within the old 2x cap; now it breaches the tightened 1x cap.
+        vm.prank(agent);
+        vm.expectRevert(abi.encodeWithSelector(Mandate.LeverageExceeded.selector, 15_000, 10_000));
+        mandate.act(Mandate.Action.Rebalance, kuru, 15_000, 30);
+    }
 }

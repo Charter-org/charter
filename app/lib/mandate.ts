@@ -19,10 +19,15 @@ export function setMandate(addr: string) {
 
 const KURU_VENUE = "0x7EFbE105Ca7415dE98F96622173458ac1c054630"; // allowlisted venue
 
+const ZERO = "0x0000000000000000000000000000000000000000" as const;
+
 const mandateAbi = parseAbi([
   "constructor(address agent_, (uint256 maxLeverageBps, uint256 maxSlippageBps, uint256 drawdownTriggerBps) terms_)",
   "function terms() view returns (uint256 maxLeverageBps, uint256 maxSlippageBps, uint256 drawdownTriggerBps)",
+  "function owner() view returns (address)",
   "function agent() view returns (address)",
+  "function setAgent(address agent_)",
+  "function setTerms((uint256 maxLeverageBps, uint256 maxSlippageBps, uint256 drawdownTriggerBps) terms_)",
   "function setVenue(address venue, bool allowed)",
   "function act(uint8 action, address venue, uint256 leverageBps, uint256 slippageBps) returns (uint256)",
   "event Decision(uint256 indexed seq, uint8 indexed action, address indexed venue, bool acted, uint256 leverageBps, uint256 slippageBps, string reason)",
@@ -109,18 +114,19 @@ export interface MandateResult {
 
 /**
  * The agent (the automated trader the mandate governs) proposes a trade at `leverageBps`, checked by
- * the on-chain mandate (gas-free eth_call, from the mandate's agent). Within bounds → allowed; out of
- * bounds → the contract reverts and we surface the reason. Real contract logic, not a client-side
- * check — and because it's simulated from the agent, it works for any viewer with zero gas.
+ * the on-chain mandate (gas-free eth_call). Within bounds → allowed; out of bounds → the contract
+ * reverts and we surface the reason. Real contract logic, not a client-side check.
+ * `from` is the proposer identity: pass the owner's address for a mandate they own (so a paused agent —
+ * agent set to 0 — reverts NotAgent instead of passing); defaults to the mandate's live agent (spine).
  */
-export async function proposeTrade(leverageBps: number): Promise<MandateResult> {
+export async function proposeTrade(leverageBps: number, from?: `0x${string}`): Promise<MandateResult> {
   try {
     await publicClient.simulateContract({
       address: getAddress(active),
       abi: mandateAbi,
       functionName: "act",
       args: [2, getAddress(KURU_VENUE), BigInt(leverageBps), 30n],
-      account: await mandateAgent(),
+      account: from ?? (await mandateAgent()),
     });
     return { allowed: true };
   } catch (e: any) {
@@ -161,4 +167,40 @@ export async function deployMandate(
   await publicClient.waitForTransactionReceipt({ hash: vhash });
   setMandate(addr);
   return addr;
+}
+
+/** Kill switch: owner sets agent to the zero address, so no one can call act/executeSwap (NotAgent).
+ *  The owner keeps full control (can resume or adjust limits); only the agent's powers are revoked. */
+export async function pauseAgent(wallet: Wallet): Promise<void> {
+  const hash = await wallet.client.writeContract({
+    address: getAddress(active), abi: mandateAbi, functionName: "setAgent", args: [ZERO],
+    account: wallet.account, chain: wallet.client.chain,
+  });
+  await publicClient.waitForTransactionReceipt({ hash });
+}
+
+/** Re-authorize the agent (owner only). */
+export async function resumeAgent(wallet: Wallet): Promise<void> {
+  const hash = await wallet.client.writeContract({
+    address: getAddress(active), abi: mandateAbi, functionName: "setAgent", args: [wallet.address],
+    account: wallet.account, chain: wallet.client.chain,
+  });
+  await publicClient.waitForTransactionReceipt({ hash });
+}
+
+/** Adjust the on-chain limits (owner only). The refusal demo and feed immediately follow the new bounds. */
+export async function updateTerms(
+  wallet: Wallet,
+  terms: { maxLeverageBps: number; maxSlippageBps: number; drawdownTriggerBps: number },
+): Promise<void> {
+  const hash = await wallet.client.writeContract({
+    address: getAddress(active), abi: mandateAbi, functionName: "setTerms",
+    args: [{
+      maxLeverageBps: BigInt(terms.maxLeverageBps),
+      maxSlippageBps: BigInt(terms.maxSlippageBps),
+      drawdownTriggerBps: BigInt(terms.drawdownTriggerBps),
+    }],
+    account: wallet.account, chain: wallet.client.chain,
+  });
+  await publicClient.waitForTransactionReceipt({ hash });
 }

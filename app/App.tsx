@@ -13,7 +13,7 @@ import { isMeraError } from "@category-labs/mera";
 import { signIn, signUp, type Wallet } from "./lib/wallet";
 import { ausdBalance } from "./lib/tokens";
 import { ensureExchangeAccount, openLong, enrollReadKey, fetchPortfolio, type Portfolio, type ReadCreds } from "./lib/trade";
-import { readTerms, proposeTrade, recentDecisions, deployMandate, type Decision } from "./lib/mandate";
+import { readTerms, proposeTrade, recentDecisions, deployMandate, pauseAgent, resumeAgent, updateTerms, type Decision } from "./lib/mandate";
 import { PERPL, rawToUsd } from "./lib/perpl";
 
 const MIN_AUSD = rawToUsd(PERPL.minAccountOpen); // 100
@@ -27,12 +27,15 @@ export default function App() {
   const [terms, setTerms] = useState<{ maxLeverageX: number; maxSlippagePct: number; drawdownPct: number } | null>(null);
   const [mandateMsg, setMandateMsg] = useState<{ text: string; refused: boolean } | null>(null);
   const [decisions, setDecisions] = useState<Decision[]>([]);
+  const [stats, setStats] = useState<{ total: number; acted: number; abstained: number; peakLeverageX: number; peakSlippagePct: number } | null>(null);
   const [creds, setCreds] = useState<ReadCreds | null>(null);
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
   const [myLev, setMyLev] = useState("2");
   const [mySlip, setMySlip] = useState("0.5");
   const [myDd, setMyDd] = useState("10");
   const [myMandate, setMyMandate] = useState<string | null>(null);
+  const [ownsMandate, setOwnsMandate] = useState(false);
+  const [agentPaused, setAgentPaused] = useState(false);
 
   const run = useCallback(async (label: string, fn: () => Promise<void>) => {
     setBusy(true);
@@ -54,6 +57,22 @@ export default function App() {
     setBalance(await ausdBalance(w.address));
   }, []);
 
+  // One on-chain read feeds both the activity feed (newest 8) and the track-record stats.
+  // Every logged Decision is within bounds by construction — a breach reverts and emits nothing.
+  const loadActivity = useCallback(async () => {
+    const all = await recentDecisions(200, 3000).catch(() => []);
+    setDecisions(all.slice(0, 8));
+    if (!all.length) return setStats(null);
+    const acted = all.filter((d) => d.acted);
+    setStats({
+      total: all.length,
+      acted: acted.length,
+      abstained: all.length - acted.length,
+      peakLeverageX: acted.reduce((m, d) => Math.max(m, d.leverageX), 0),
+      peakSlippagePct: acted.reduce((m, d) => Math.max(m, d.slippagePct), 0),
+    });
+  }, []);
+
   const enter = (create: boolean) =>
     run(create ? "Creating your account" : "Signing in", async () => {
       const w = create ? await signUp() : await signIn();
@@ -65,18 +84,20 @@ export default function App() {
   useEffect(() => {
     if (!wallet) return;
     readTerms().then(setTerms).catch(() => {});
-    recentDecisions().then(setDecisions).catch(() => {});
-  }, [wallet]);
+    loadActivity();
+  }, [wallet, loadActivity]);
 
   const propose = (leverageBps: number) => async () => {
     setBusy(true);
     setMandateMsg(null);
     try {
-      const r = await proposeTrade(leverageBps);
+      const r = await proposeTrade(leverageBps, ownsMandate && wallet ? wallet.address : undefined);
       const x = (leverageBps / 10000).toFixed(2);
       setMandateMsg(
         r.allowed
           ? { refused: false, text: `✓ Allowed — ${x}× is within your mandate.` }
+          : agentPaused
+          ? { refused: true, text: "⛔ Agent is paused — no trade is possible until you resume it." }
           : {
               refused: true,
               text: `⛔ Refused by your mandate — ${x}× exceeds your ${terms?.maxLeverageX.toFixed(
@@ -100,10 +121,40 @@ export default function App() {
         drawdownTriggerBps: Math.round(parseFloat(myDd) * 100),
       });
       setMyMandate(addr);
+      setOwnsMandate(true);
+      setAgentPaused(false);
       setMandateMsg(null);
       setTerms(await readTerms());
-      setDecisions(await recentDecisions().catch(() => []));
+      await loadActivity();
       setStatus("✓ Your mandate is live at " + addr.slice(0, 10) + "…");
+    });
+
+  const toggleAgent = () =>
+    run(agentPaused ? "Resuming agent" : "Pausing agent", async () => {
+      if (!wallet) return;
+      if (agentPaused) {
+        await resumeAgent(wallet);
+        setAgentPaused(false);
+        setStatus("✓ Agent resumed.");
+      } else {
+        await pauseAgent(wallet);
+        setAgentPaused(true);
+        setStatus("✓ Agent paused — no trades possible until you resume.");
+      }
+      setMandateMsg(null);
+    });
+
+  const updateLimits = () =>
+    run("Updating your limits", async () => {
+      if (!wallet) return;
+      await updateTerms(wallet, {
+        maxLeverageBps: Math.round(parseFloat(myLev) * 10000),
+        maxSlippageBps: Math.round(parseFloat(mySlip) * 100),
+        drawdownTriggerBps: Math.round(parseFloat(myDd) * 100),
+      });
+      setTerms(await readTerms());
+      setMandateMsg(null);
+      setStatus("✓ Limits updated on-chain.");
     });
 
   const setupTrading = () =>
@@ -150,7 +201,7 @@ export default function App() {
               <Text style={styles.balance}>{balance ?? "—"} <Text style={styles.ausd}>AUSD</Text></Text>
               <Button label="Refresh" variant="ghost" onPress={() => run("Refreshing", async () => {
                 await refreshBalance(wallet);
-                setDecisions(await recentDecisions().catch(() => []));
+                await loadActivity();
                 if (creds) setPortfolio(await fetchPortfolio(creds));
               })} disabled={busy} />
             </View>
@@ -170,7 +221,7 @@ export default function App() {
               </View>
             )}
 
-            {terms && (
+            {terms && !ownsMandate && (
               <View style={styles.card}>
                 <Text style={styles.cardTitle}>Create your own mandate</Text>
                 <Text style={styles.muted}>Set your limits and deploy a mandate you own, on-chain.</Text>
@@ -180,7 +231,38 @@ export default function App() {
                   <Field label="Hedge %" value={myDd} onChange={setMyDd} />
                 </View>
                 <Button label="Deploy my mandate" onPress={deployMine} disabled={busy} />
+              </View>
+            )}
+
+            {terms && ownsMandate && (
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>Manage your mandate</Text>
                 {myMandate && <Text style={styles.allowed}>✓ Live at {myMandate.slice(0, 10)}… — you own it.</Text>}
+                <Text style={styles.muted}>
+                  {agentPaused ? "Agent is paused — it cannot trade." : "Agent is active, bounded by your limits."}
+                </Text>
+                <Button label={agentPaused ? "Resume agent" : "Pause agent (kill switch)"} onPress={toggleAgent} disabled={busy} />
+                <Text style={styles.muted}>Adjust your limits — enforced on-chain the moment you save.</Text>
+                <View style={styles.inputRow}>
+                  <Field label="Max lev ×" value={myLev} onChange={setMyLev} />
+                  <Field label="Max slip %" value={mySlip} onChange={setMySlip} />
+                  <Field label="Hedge %" value={myDd} onChange={setMyDd} />
+                </View>
+                <Button label="Update limits" variant="ghost" onPress={updateLimits} disabled={busy} />
+              </View>
+            )}
+
+            {stats && (
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>Track record</Text>
+                <Text style={styles.balance}>{stats.total} <Text style={styles.ausd}>decisions</Text></Text>
+                <Text style={styles.allowed}>✓ 0 breaches — every one stayed within your mandate</Text>
+                {terms && (
+                  <Text style={styles.muted}>
+                    Peak leverage {stats.peakLeverageX.toFixed(2)}× / {terms.maxLeverageX.toFixed(2)}× cap · Peak slippage {stats.peakSlippagePct.toFixed(2)}% / {terms.maxSlippagePct.toFixed(2)}% cap
+                  </Text>
+                )}
+                <Text style={styles.muted}>{stats.acted} acted · {stats.abstained} abstained · all verifiable on-chain</Text>
               </View>
             )}
 
