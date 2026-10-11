@@ -11,7 +11,7 @@ import { StatusBar } from "expo-status-bar";
 import { isMeraError } from "@category-labs/mera";
 import { signIn, signUp, type Wallet } from "./lib/wallet";
 import { ausdBalance } from "./lib/tokens";
-import { ensureExchangeAccount, openLong } from "./lib/trade";
+import { ensureExchangeAccount, openLong, enrollReadKey, fetchPortfolio, type Portfolio, type ReadCreds } from "./lib/trade";
 import { readTerms, proposeTrade, recentDecisions, type Decision } from "./lib/mandate";
 import { PERPL, rawToUsd } from "./lib/perpl";
 
@@ -26,6 +26,8 @@ export default function App() {
   const [terms, setTerms] = useState<{ maxLeverageX: number; maxSlippagePct: number; drawdownPct: number } | null>(null);
   const [mandateMsg, setMandateMsg] = useState<{ text: string; refused: boolean } | null>(null);
   const [decisions, setDecisions] = useState<Decision[]>([]);
+  const [creds, setCreds] = useState<ReadCreds | null>(null);
+  const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
 
   const run = useCallback(async (label: string, fn: () => Promise<void>) => {
     setBusy(true);
@@ -89,6 +91,9 @@ export default function App() {
       if (!wallet) return;
       await ensureExchangeAccount(wallet);
       setAccountReady(true);
+      const c = await enrollReadKey(wallet);
+      setCreds(c);
+      setPortfolio(await fetchPortfolio(c));
       setStatus("Trading account ready.");
     });
 
@@ -98,6 +103,7 @@ export default function App() {
       const tx = await openLong(wallet, { marketId: PERPL.marketIds.BTC, sizeScaled: 10 });
       setStatus("✓ Long opened on Perpl · tx " + tx.slice(0, 10) + "…");
       await refreshBalance(wallet);
+      if (creds) setPortfolio(await fetchPortfolio(creds));
     });
 
   const funded = balance != null && Number(balance) >= MIN_AUSD;
@@ -167,6 +173,16 @@ export default function App() {
               <Button label="Set up trading account" onPress={setupTrading} disabled={busy || !funded} />
               <Button label="Open BTC long" onPress={trade} disabled={busy || !accountReady} />
             </View>
+
+            {portfolio && (
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>Portfolio</Text>
+                <Text style={styles.balance}>{portfolio.accountValue.toFixed(2)} <Text style={styles.ausd}>AUSD</Text></Text>
+                <Text style={styles.muted}>
+                  Realized PnL {portfolio.realizedPnl >= 0 ? "+" : ""}{portfolio.realizedPnl.toFixed(2)} AUSD · Volume {portfolio.volume.toFixed(0)} · {portfolio.openPositions} open position{portfolio.openPositions === 1 ? "" : "s"}
+                </Text>
+              </View>
+            )}
           </>
         )}
 

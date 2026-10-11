@@ -6,7 +6,7 @@
 //   2. openLong              — execOrder(...) on the exchange
 // enroll()/signTypedFor are the authenticated-read path (Ed25519 API key); not needed to trade.
 import { parseAbi, hashTypedData } from "viem";
-import { PERPL, enrollApiKey, getContext, type SignTyped, type EnrollResult } from "./perpl";
+import { PERPL, enrollApiKey, signedFetch, getContext, type SignTyped, type EnrollResult } from "./perpl";
 import { publicClient } from "./tokens";
 import type { Wallet } from "./wallet";
 
@@ -89,4 +89,40 @@ export async function openLong(wallet: Wallet, opts: { marketId: number; sizeSca
 /** Wallet-signed Ed25519 API-key enrollment (authenticated reads: account, positions, fills). */
 export async function enroll(wallet: Wallet, origin = "https://testnet.perpl.xyz"): Promise<EnrollResult> {
   return enrollApiKey({ address: wallet.address, origin, label: "charter", signTyped: signTypedFor(wallet) });
+}
+
+export interface ReadCreds {
+  apiKey: string;
+  privateKey: Uint8Array;
+}
+
+/** Enroll a read-scoped API key (for the portfolio). Requires the exchange account to exist. */
+export async function enrollReadKey(wallet: Wallet): Promise<ReadCreds> {
+  const r = await enrollApiKey({
+    address: wallet.address, origin: "https://testnet.perpl.xyz", label: "charter-read", scopeMask: 1,
+    signTyped: signTypedFor(wallet),
+  });
+  return { apiKey: r.apiKey, privateKey: r.privateKey };
+}
+
+export interface Portfolio {
+  accountValue: number; // AUSD in the exchange
+  realizedPnl: number; // AUSD
+  volume: number; // AUSD traded
+  openPositions: number;
+}
+
+/** Live portfolio from Perpl's authenticated REST (GET /v1/trading/wallet + /positions). */
+export async function fetchPortfolio(creds: ReadCreds): Promise<Portfolio> {
+  const w = await (await signedFetch(creds, "GET", "/v1/trading/wallet")).json();
+  const p = await (await signedFetch(creds, "GET", "/v1/trading/positions")).json();
+  const acct = w.as?.[0];
+  const st = w.sts?.[0];
+  const dec = 10 ** PERPL.collateralDecimals;
+  return {
+    accountValue: Number(acct?.b ?? 0) / dec,
+    realizedPnl: Number(st?.trp ?? 0) / dec,
+    volume: Number(st?.tv ?? 0) / dec,
+    openPositions: (p.d ?? []).length,
+  };
 }
