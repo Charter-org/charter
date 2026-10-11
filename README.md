@@ -32,9 +32,12 @@ Built for the **Monad Metropolis Hackathon** — Track 01, Onchain Finance & Tra
   decision on-chain — `act(Hedge|Rebalance)` or `abstain(reason)` — and the mandate blocks any breach.
 - **Live Activity feed.** Every decision the agent makes (including every decision to do nothing) is a
   public `Decision` event, shown in-app.
+- **Proof-of-performance.** A provable track record: how many decisions the agent made and that it
+  **never once breached your limits** — read straight from the on-chain log, not a self-reported number.
 - **Real Perpl trade.** Set up a trading account and open a BTC perp long — a real on-chain `execOrder`.
 - **Portfolio.** Account value, realized PnL, volume, open positions — from Perpl's authenticated API.
-- **Deploy your own mandate.** Set your own limits and deploy a mandate _you own_, on-chain, from the app.
+- **Deploy your own mandate, and stay in control.** Deploy a mandate _you own_ on-chain, then **pause
+  the agent instantly** (a kill switch) or adjust your limits live — all owner-only, enforced on-chain.
 
 ## How it works
 
@@ -66,7 +69,8 @@ All on **Monad testnet** (chainId 10143, [explorer](https://testnet.monadexplore
 - Full deployment + evidence: [`deployments/monad-testnet.json`](deployments/monad-testnet.json).
 
 The custody/executed-trade enforcement (a breach reverts a _real_ spot trade, not just a log) is
-implemented and unit-tested in [`test/MandateExecution.t.sol`](test/MandateExecution.t.sol) — 14/14 pass.
+implemented and unit-tested in [`test/MandateExecution.t.sol`](test/MandateExecution.t.sol); the kill
+switch and live limit-tightening are tested too — 16/16 pass.
 
 ## Built on — and the bounties it targets
 
