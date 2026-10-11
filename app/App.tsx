@@ -12,7 +12,7 @@ import { isMeraError } from "@category-labs/mera";
 import { signIn, signUp, type Wallet } from "./lib/wallet";
 import { ausdBalance } from "./lib/tokens";
 import { ensureExchangeAccount, openLong } from "./lib/trade";
-import { readTerms, proposeTrade } from "./lib/mandate";
+import { readTerms, proposeTrade, recentDecisions, type Decision } from "./lib/mandate";
 import { PERPL, rawToUsd } from "./lib/perpl";
 
 const MIN_AUSD = rawToUsd(PERPL.minAccountOpen); // 100
@@ -25,6 +25,7 @@ export default function App() {
   const [status, setStatus] = useState("");
   const [terms, setTerms] = useState<{ maxLeverageX: number; maxSlippagePct: number; drawdownPct: number } | null>(null);
   const [mandateMsg, setMandateMsg] = useState<{ text: string; refused: boolean } | null>(null);
+  const [decisions, setDecisions] = useState<Decision[]>([]);
 
   const run = useCallback(async (label: string, fn: () => Promise<void>) => {
     setBusy(true);
@@ -55,7 +56,9 @@ export default function App() {
     });
 
   useEffect(() => {
-    if (wallet) readTerms().then(setTerms).catch(() => {});
+    if (!wallet) return;
+    readTerms().then(setTerms).catch(() => {});
+    recentDecisions().then(setDecisions).catch(() => {});
   }, [wallet]);
 
   const propose = (leverageBps: number) => async () => {
@@ -137,6 +140,23 @@ export default function App() {
               </View>
             )}
 
+            {decisions.length > 0 && (
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>Agent activity</Text>
+                <Text style={styles.muted}>Every decision your agent makes — recorded on-chain.</Text>
+                {decisions.map((d) => (
+                  <View key={d.seq} style={styles.decisionRow}>
+                    <Text style={styles.decisionSeq}>#{d.seq}</Text>
+                    <Text style={styles.decisionText}>
+                      {d.acted
+                        ? `${d.action} · ${d.leverageX.toFixed(2)}× · ${d.slippagePct}%`
+                        : `Abstained — ${d.reason}`}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Trade on Perpl</Text>
               {!funded && (
@@ -192,4 +212,7 @@ const styles = StyleSheet.create({
   status: { color: "#AEB6C7", fontSize: 14, marginTop: 16, textAlign: "center" },
   refused: { color: "#FF6B6B", fontSize: 15, fontWeight: "700" },
   allowed: { color: "#5BD6A0", fontSize: 15, fontWeight: "700" },
+  decisionRow: { flexDirection: "row", gap: 10, alignItems: "baseline" },
+  decisionSeq: { color: "#5A6478", fontFamily: "monospace", fontSize: 12, width: 28 },
+  decisionText: { color: "#AEB6C7", fontSize: 14, flex: 1 },
 });
