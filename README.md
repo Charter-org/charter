@@ -1,72 +1,112 @@
-# CHARTER
+# Charter
 
-**A position manager that runs every block, bounded by a rule it cannot break.**
+**Automated investing is a promise. Charter makes it a _guarantee_.**
 
-You deposit. You set a mandate once — *never above 2× leverage · never more than X bps slippage ·
-hedge if drawdown exceeds Y%*. An agent then manages the position continuously, hedging on **Perpl**
-and rebalancing through **Kuru**. Every decision — including every decision to do nothing — is
-written on-chain for anyone to replay.
+Charter is a mobile app where an autonomous agent manages a position on **Monad**, bound by a rule it
+**cannot break**. You set a mandate once — _never above 2× leverage · never more than 0.5% slippage ·
+hedge if drawdown exceeds 10%_ — and it lives in a **contract, not a prompt**. When the agent tries to
+exceed the bound, the contract reverts. No seed phrase, no extension, no custody backend: your account
+is a **passkey**.
 
-The mandate lives in a **contract, not a prompt**. The agent cannot talk its way past it: when it
-tries to exceed the bound, the contract reverts. This is the only honest answer to "how much
-autonomy do you give an agent over real money?" — and it only exists on Monad, because per-block
-on-chain action is economically impossible anywhere else.
+<p align="center">
+  <img src="docs/screenshots/02-mandate-refusal.png" width="30%" alt="The agent attempts a reckless 3× long and the on-chain mandate refuses it">
+  &nbsp;
+  <img src="docs/screenshots/03-agent-activity.png" width="30%" alt="Every agent decision recorded on-chain">
+  &nbsp;
+  <img src="docs/screenshots/01-home.png" width="30%" alt="Charter home: passkey account, mandate, deploy your own">
+</p>
+
+> The money shot (left): the agent proposes a 3× long; the mandate reverts on-chain — **no trade happens.**
 
 Built for the **Monad Metropolis Hackathon** — Track 01, Onchain Finance & Trading.
 
 ---
 
-## Status
+## What it does
 
-Spine live on **Monad testnet** (chainId 10143).
+- **Passkey sign-in (Mera).** Your account is a passkey — no seed phrase, no browser extension, no
+  custody backend. One Face-ID/biometric and you have an EVM account on Monad.
+- **Your mandate, enforced on-chain.** Max leverage, max slippage, drawdown trigger — in a contract.
+  The agent proposes a trade; a reckless **3× long is refused** (the contract reverts); a 1.5× is allowed.
+- **An autonomous agent, not a button.** A keeper reads a live market signal each tick and writes its
+  decision on-chain — `act(Hedge|Rebalance)` or `abstain(reason)` — and the mandate blocks any breach.
+- **Live Activity feed.** Every decision the agent makes (including every decision to do nothing) is a
+  public `Decision` event, shown in-app.
+- **Real Perpl trade.** Set up a trading account and open a BTC perp long — a real on-chain `execOrder`.
+- **Portfolio.** Account value, realized PnL, volume, open positions — from Perpl's authenticated API.
+- **Deploy your own mandate.** Set your own limits and deploy a mandate _you own_, on-chain, from the app.
 
-- **`Mandate` contract:** [`0x564EFe00cfF81eaF6A65422758C27A0c89EAA648`](https://testnet.monadexplorer.com/address/0x564EFe00cfF81eaF6A65422758C27A0c89EAA648)
-  — terms: max **2.00x** leverage · max **0.50%** slippage · hedge trigger at **10%** drawdown.
-- **Custody + execution:** the owner deposits capital into the mandate; the agent can only move it
-  through `executeSwap`, which measures the realized fill and **reverts the trade** if it breaches the
-  slippage floor. A breach undoes a real swap, not just a log row (`test/MandateExecution.t.sol`).
-- **Proven on-chain:** an in-bounds action and an abstention are recorded as `Decision` rows; an
-  attempt to exceed leverage (2.50x) **reverts** (`LeverageExceeded`). 14/14 local tests pass.
-- Deployment + evidence tx hashes: `deployments/monad-testnet.json`. Venue constants: `config/monad.ts`.
-- Bounty adherence checklist: `BOUNTIES.md`.
+## How it works
 
-The custody gate is live and tested. Next: exercise the `executeSwap` refusal on-chain against a real
-Kuru router + price-source adapter, then the per-block agent loop and the Mera/AUSD mobile surface.
+```mermaid
+flowchart LR
+  PK[Passkey] -->|Mera PRF → HD key| W[EVM account]
+  subgraph onchain [Monad testnet]
+    M["Mandate.sol<br/>leverage · slippage · drawdown"]
+    EX[Perpl exchange]
+  end
+  AG[Agent keeper] -->|act / abstain every tick| M
+  M -->|reverts if breached| AG
+  M -->|Decision events| FEED[In-app activity feed]
+  W -->|execOrder| EX
+  M -.the agent is bound by.- EX
+```
 
-## Architecture (planned, spine-first)
+The mandate is the trust primitive: the agent (a bot) can only act _within_ it, and every decision is
+on-chain for anyone to replay. A compromised or buggy agent still can't exceed your limits.
 
-1. **`Mandate.sol`** on Monad — max leverage, max slippage, drawdown trigger, allowlisted venues.
-   Reverts on breach. The contract the agent cannot exceed.
-2. **Per-block agent loop** — read position → evaluate against the mandate → decide → act or abstain.
-3. **On-chain decision log** — every evaluation is a row: inputs seen, rule applied, action taken or
-   the reason for abstaining. Abstentions are rows too.
-4. **Venues** — Perpl (perps hedge), Kuru (on-chain spot rebalance).
-5. **Surface** — Mera passkey login (no seed phrase, no extension), AUSD balance, a page anyone can drive.
-6. **Baseline** — a naive hourly rebalancer run on the same data, for the headline number.
+## Proven on-chain — don't trust, verify
 
-## Tech stack
+All on **Monad testnet** (chainId 10143, [explorer](https://testnet.monadexplorer.com)):
 
-- **Chain:** Monad testnet (chainId `10143`) — see `config/monad.ts`.
-- **Contracts:** Solidity / Foundry.
-- **App:** TypeScript; viem/wagmi; Mera for passkey accounts.
-- **Venues:** `@kuru-labs/kuru-sdk` (on-chain CLOB); Perpl REST/WS API (Ed25519-signed).
+- **Mandate** (agent-operated): [`0x564EFe…A648`](https://testnet.monadexplorer.com/address/0x564EFe00cfF81eaF6A65422758C27A0c89EAA648)
+  — every `Decision` event is an agent move; a 3× proposal reverts `LeverageExceeded` (`0x6881ba1f`).
+- **Perpl exchange:** [`0x1964…80cc`](https://testnet.monadexplorer.com/address/0x1964C32f0bE608E7D29302AFF5E61268E72080cc)
+  — real `execOrder` BTC longs placed from a passkey account.
+- Full deployment + evidence: [`deployments/monad-testnet.json`](deployments/monad-testnet.json).
 
-## Setup
+The custody/executed-trade enforcement (a breach reverts a _real_ spot trade, not just a log) is
+implemented and unit-tested in [`test/MandateExecution.t.sol`](test/MandateExecution.t.sol) — 14/14 pass.
 
-_To be filled in as the build lands. Network constants and contract addresses live in
-`config/monad.ts`._
+## Built on — and the bounties it targets
 
-## Attribution
+| Integration | What Charter uses it for | Bounty |
+| --- | --- | --- |
+| **Mera** | passkey → EVM account, no seed/extension/backend | Monad "Best Mera-Powered UX" |
+| **Perpl** | real perp trade (`execOrder`) + authed portfolio API | "Best use of Perpl's API" |
+| **The Mandate** | on-chain leverage/slippage/drawdown enforcement + auto-hedge | **Perpl "Best Analytics / Risk Tool"** |
+| **AUSD** (Agora) | the displayed balance _and_ Perpl collateral (one token) | Agora "Best Mobile Trading App" |
+| **Monad** | per-block agent decisions, fully on-chain | Track 01, Onchain Finance & Trading |
 
-External SDKs and docs: `@kuru-labs/kuru-sdk`, Perpl `api-docs`, Mera (`category-labs/mera`), Agora
-AUSD. Any third-party code is identified at its use site.
+## Try it
+
+- **Install the APK** (Android 13+): see [Releases](https://github.com/Charter-org/charter/releases).
+  Passkey sign-in + the Mandate refusal work with zero funding; the Perpl trade needs testnet MON
+  (`faucet.monad.xyz`) + AUSD.
+- **Run from source:** `app/` is an Expo app ([app/README.md](app/README.md)); `keeper/` is the agent
+  loop ([keeper/README.md](keeper/README.md)); contracts are Foundry (`forge test`).
+
+## Repo layout
+
+```
+src/            Mandate.sol — the on-chain guarantee (+ interfaces)
+test/           Foundry tests (incl. the custody slippage-floor refusal)
+keeper/         autonomous agent loop (reads signal → decides → on-chain)
+app/            Expo mobile app (Mera passkey, mandate, Perpl, portfolio)
+config/         verified Monad + Perpl/Kuru/AUSD constants
+deployments/    live addresses + on-chain evidence
+```
+
+## Tech
+
+Solidity / Foundry · Monad testnet · Expo / React Native · viem · Mera (passkey accounts) ·
+Perpl REST/WS (Ed25519-signed) · AUSD (Agora).
 
 ## AI tool disclosure
 
-This project is built with AI coding assistance (Claude Code). Per hackathon rules, AI tool use is
-permitted and disclosed here. Human authors direct the design, review all code, and own the
-submission.
+Built with AI coding assistance (Claude Code). Per hackathon rules, AI tool use is permitted and
+disclosed here. Human authors direct the design, review all code, and own the submission.
 
 ## License
 
-MIT — see `LICENSE`.
+MIT — see [LICENSE](LICENSE).
