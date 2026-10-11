@@ -4,13 +4,26 @@
 // to show enforcement. Same mandate the keeper writes to (see deployments/monad-testnet.json).
 import { parseAbi, getAddress } from "viem";
 import { publicClient } from "./tokens";
+import { MANDATE_BYTECODE } from "./mandateBytecode";
+import type { Wallet } from "./wallet";
 
-export const MANDATE = "0x564EFe00cfF81eaF6A65422758C27A0c89EAA648";
+// The shared demo mandate the keeper writes to. A user can deploy their OWN (deployMandate) and the
+// app then points at theirs (setMandate) — refusal demo, feed, and agent all follow the active one.
+const DEFAULT_MANDATE = "0x564EFe00cfF81eaF6A65422758C27A0c89EAA648";
+let active = DEFAULT_MANDATE;
+export const currentMandate = () => active;
+export function setMandate(addr: string) {
+  active = addr;
+  cachedAgent = undefined;
+}
+
 const KURU_VENUE = "0x7EFbE105Ca7415dE98F96622173458ac1c054630"; // allowlisted venue
 
 const mandateAbi = parseAbi([
+  "constructor(address agent_, (uint256 maxLeverageBps, uint256 maxSlippageBps, uint256 drawdownTriggerBps) terms_)",
   "function terms() view returns (uint256 maxLeverageBps, uint256 maxSlippageBps, uint256 drawdownTriggerBps)",
   "function agent() view returns (address)",
+  "function setVenue(address venue, bool allowed)",
   "function act(uint8 action, address venue, uint256 leverageBps, uint256 slippageBps) returns (uint256)",
   "event Decision(uint256 indexed seq, uint8 indexed action, address indexed venue, bool acted, uint256 leverageBps, uint256 slippageBps, string reason)",
   "error LeverageExceeded(uint256 requested, uint256 max)",
@@ -48,7 +61,7 @@ export async function recentDecisions(limit = 8, lookbackBlocks = 3000): Promise
     const batch = await Promise.all(
       ranges.slice(i, i + CONCURRENCY).map(([from, to]) =>
         publicClient
-          .getContractEvents({ address: getAddress(MANDATE), abi: mandateAbi, eventName: "Decision", fromBlock: from, toBlock: to })
+          .getContractEvents({ address: getAddress(active), abi: mandateAbi, eventName: "Decision", fromBlock: from, toBlock: to })
           .catch(() => []),
       ),
     );
@@ -71,7 +84,7 @@ let cachedAgent: `0x${string}` | undefined;
 async function mandateAgent(): Promise<`0x${string}`> {
   if (!cachedAgent) {
     cachedAgent = (await publicClient.readContract({
-      address: getAddress(MANDATE), abi: mandateAbi, functionName: "agent",
+      address: getAddress(active), abi: mandateAbi, functionName: "agent",
     })) as `0x${string}`;
   }
   return cachedAgent;
@@ -79,7 +92,7 @@ async function mandateAgent(): Promise<`0x${string}`> {
 
 export async function readTerms() {
   const [lev, slip, dd] = (await publicClient.readContract({
-    address: getAddress(MANDATE), abi: mandateAbi, functionName: "terms",
+    address: getAddress(active), abi: mandateAbi, functionName: "terms",
   })) as readonly [bigint, bigint, bigint];
   return {
     maxLeverageX: Number(lev) / 10000,
@@ -103,7 +116,7 @@ export interface MandateResult {
 export async function proposeTrade(leverageBps: number): Promise<MandateResult> {
   try {
     await publicClient.simulateContract({
-      address: getAddress(MANDATE),
+      address: getAddress(active),
       abi: mandateAbi,
       functionName: "act",
       args: [2, getAddress(KURU_VENUE), BigInt(leverageBps), 30n],
@@ -117,4 +130,35 @@ export async function proposeTrade(leverageBps: number): Promise<MandateResult> 
     );
     return { allowed: false, reason: reason ?? "reverted" };
   }
+}
+
+/** Deploy a mandate the user OWNS (owner + agent = their account), allowlist the venue, and point the
+ *  app at it. Needs MON gas. After this, the refusal demo and feed follow the user's own mandate. */
+export async function deployMandate(
+  wallet: Wallet,
+  terms: { maxLeverageBps: number; maxSlippageBps: number; drawdownTriggerBps: number },
+): Promise<`0x${string}`> {
+  const deployHash = await wallet.client.deployContract({
+    abi: mandateAbi,
+    bytecode: MANDATE_BYTECODE as `0x${string}`,
+    args: [
+      wallet.address,
+      {
+        maxLeverageBps: BigInt(terms.maxLeverageBps),
+        maxSlippageBps: BigInt(terms.maxSlippageBps),
+        drawdownTriggerBps: BigInt(terms.drawdownTriggerBps),
+      },
+    ],
+    account: wallet.account,
+    chain: wallet.client.chain,
+  });
+  const receipt = await publicClient.waitForTransactionReceipt({ hash: deployHash });
+  const addr = receipt.contractAddress as `0x${string}`;
+  const vhash = await wallet.client.writeContract({
+    address: addr, abi: mandateAbi, functionName: "setVenue", args: [getAddress(KURU_VENUE), true],
+    account: wallet.account, chain: wallet.client.chain,
+  });
+  await publicClient.waitForTransactionReceipt({ hash: vhash });
+  setMandate(addr);
+  return addr;
 }

@@ -5,6 +5,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
@@ -12,7 +13,7 @@ import { isMeraError } from "@category-labs/mera";
 import { signIn, signUp, type Wallet } from "./lib/wallet";
 import { ausdBalance } from "./lib/tokens";
 import { ensureExchangeAccount, openLong, enrollReadKey, fetchPortfolio, type Portfolio, type ReadCreds } from "./lib/trade";
-import { readTerms, proposeTrade, recentDecisions, type Decision } from "./lib/mandate";
+import { readTerms, proposeTrade, recentDecisions, deployMandate, type Decision } from "./lib/mandate";
 import { PERPL, rawToUsd } from "./lib/perpl";
 
 const MIN_AUSD = rawToUsd(PERPL.minAccountOpen); // 100
@@ -28,6 +29,10 @@ export default function App() {
   const [decisions, setDecisions] = useState<Decision[]>([]);
   const [creds, setCreds] = useState<ReadCreds | null>(null);
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
+  const [myLev, setMyLev] = useState("2");
+  const [mySlip, setMySlip] = useState("0.5");
+  const [myDd, setMyDd] = useState("10");
+  const [myMandate, setMyMandate] = useState<string | null>(null);
 
   const run = useCallback(async (label: string, fn: () => Promise<void>) => {
     setBusy(true);
@@ -86,6 +91,21 @@ export default function App() {
     }
   };
 
+  const deployMine = () =>
+    run("Deploying your mandate", async () => {
+      if (!wallet) return;
+      const addr = await deployMandate(wallet, {
+        maxLeverageBps: Math.round(parseFloat(myLev) * 10000),
+        maxSlippageBps: Math.round(parseFloat(mySlip) * 100),
+        drawdownTriggerBps: Math.round(parseFloat(myDd) * 100),
+      });
+      setMyMandate(addr);
+      setMandateMsg(null);
+      setTerms(await readTerms());
+      setDecisions(await recentDecisions().catch(() => []));
+      setStatus("✓ Your mandate is live at " + addr.slice(0, 10) + "…");
+    });
+
   const setupTrading = () =>
     run("Opening your Perpl account", async () => {
       if (!wallet) return;
@@ -143,6 +163,20 @@ export default function App() {
                 {mandateMsg && (
                   <Text style={mandateMsg.refused ? styles.refused : styles.allowed}>{mandateMsg.text}</Text>
                 )}
+              </View>
+            )}
+
+            {terms && (
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>Create your own mandate</Text>
+                <Text style={styles.muted}>Set your limits and deploy a mandate you own, on-chain.</Text>
+                <View style={styles.inputRow}>
+                  <Field label="Max lev ×" value={myLev} onChange={setMyLev} />
+                  <Field label="Max slip %" value={mySlip} onChange={setMySlip} />
+                  <Field label="Hedge %" value={myDd} onChange={setMyDd} />
+                </View>
+                <Button label="Deploy my mandate" onPress={deployMine} disabled={busy} />
+                {myMandate && <Text style={styles.allowed}>✓ Live at {myMandate.slice(0, 10)}… — you own it.</Text>}
               </View>
             )}
 
@@ -209,6 +243,15 @@ function Button({ label, onPress, disabled, variant }: { label: string; onPress:
   );
 }
 
+function Field({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <View style={styles.field}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <TextInput value={value} onChangeText={onChange} keyboardType="decimal-pad" style={styles.input} />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#0B0D12" },
   container: { padding: 24, paddingTop: 72, gap: 16 },
@@ -231,4 +274,8 @@ const styles = StyleSheet.create({
   decisionRow: { flexDirection: "row", gap: 10, alignItems: "baseline" },
   decisionSeq: { color: "#5A6478", fontFamily: "monospace", fontSize: 12, width: 28 },
   decisionText: { color: "#AEB6C7", fontSize: 14, flex: 1 },
+  inputRow: { flexDirection: "row", gap: 10 },
+  field: { flex: 1, gap: 4 },
+  fieldLabel: { color: "#8A93A6", fontSize: 12 },
+  input: { backgroundColor: "#0B0D12", borderWidth: 1, borderColor: "#2A3142", borderRadius: 10, color: "#F5F7FF", paddingVertical: 10, paddingHorizontal: 12, fontSize: 16 },
 });
