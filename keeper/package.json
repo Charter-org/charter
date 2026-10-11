@@ -1,0 +1,11 @@
+{
+  "name": "charter-keeper",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "agent": "bun run agent.ts"
+  },
+  "dependencies": {
+    "viem": "^2.28.0"
+  }
+}
