@@ -148,7 +148,11 @@ export default function App() {
               <Text style={styles.cardTitle}>Account</Text>
               <Text selectable style={styles.mono}>{wallet.address}</Text>
               <Text style={styles.balance}>{balance ?? "—"} <Text style={styles.ausd}>AUSD</Text></Text>
-              <Button label="Refresh" variant="ghost" onPress={() => run("Refreshing", () => refreshBalance(wallet))} disabled={busy} />
+              <Button label="Refresh" variant="ghost" onPress={() => run("Refreshing", async () => {
+                await refreshBalance(wallet);
+                setDecisions(await recentDecisions().catch(() => []));
+                if (creds) setPortfolio(await fetchPortfolio(creds));
+              })} disabled={busy} />
             </View>
 
             {terms && (
