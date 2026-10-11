@@ -3,12 +3,21 @@ import {
   ActivityIndicator,
   Pressable,
   ScrollView,
+  StatusBar as RNStatusBar,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
+import {
+  useFonts,
+  Inter_400Regular,
+  Inter_500Medium,
+  Inter_600SemiBold,
+  Inter_700Bold,
+  Inter_800ExtraBold,
+} from "@expo-google-fonts/inter";
 import { isMeraError } from "@category-labs/mera";
 import { signIn, signUp, type Wallet } from "./lib/wallet";
 import { ausdBalance } from "./lib/tokens";
@@ -18,14 +27,50 @@ import { PERPL, rawToUsd } from "./lib/perpl";
 
 const MIN_AUSD = rawToUsd(PERPL.minAccountOpen); // 100
 
+// Design tokens — slate base, one trust-blue accent, semantic green/red. Swiss-minimal, fintech-grade.
+const C = {
+  bg: "#080B12",
+  surface: "#10141E",
+  inputBg: "#0A0E16",
+  border: "#1E2636",
+  borderSoft: "#171E2B",
+  text: "#EEF2F8",
+  muted: "#99A2B5",
+  faint: "#5F6B80",
+  accent: "#4E6FFF",
+  accentSoft: "rgba(78,111,255,0.14)",
+  pos: "#35D08A",
+  posSoft: "rgba(53,208,138,0.12)",
+  neg: "#FF5A5A",
+  negSoft: "rgba(255,90,90,0.12)",
+  warn: "#E8B04B",
+};
+const F = {
+  regular: "Inter_400Regular",
+  medium: "Inter_500Medium",
+  semibold: "Inter_600SemiBold",
+  bold: "Inter_700Bold",
+  extrabold: "Inter_800ExtraBold",
+};
+
+type MsgTone = "allowed" | "refused" | "paused";
+
 export default function App() {
+  const [fontsLoaded, fontError] = useFonts({
+    Inter_400Regular,
+    Inter_500Medium,
+    Inter_600SemiBold,
+    Inter_700Bold,
+    Inter_800ExtraBold,
+  });
+
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [balance, setBalance] = useState<string | null>(null);
   const [accountReady, setAccountReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [terms, setTerms] = useState<{ maxLeverageX: number; maxSlippagePct: number; drawdownPct: number } | null>(null);
-  const [mandateMsg, setMandateMsg] = useState<{ text: string; refused: boolean } | null>(null);
+  const [mandateMsg, setMandateMsg] = useState<{ tone: MsgTone; text: string } | null>(null);
   const [decisions, setDecisions] = useState<Decision[]>([]);
   const [stats, setStats] = useState<{ total: number; acted: number; abstained: number; peakLeverageX: number; peakSlippagePct: number } | null>(null);
   const [creds, setCreds] = useState<ReadCreds | null>(null);
@@ -47,7 +92,7 @@ export default function App() {
       console.error(label, "code=", e?.code, "| cause=", e?.cause?.message ?? e?.cause, "| raw=", e);
       const cause = e?.cause?.message ?? e?.cause ? ` (${e?.cause?.message ?? e?.cause})` : "";
       const msg = isMeraError(e) ? `${e.code}: ${e.message}${cause}` : e?.message ?? String(e);
-      setStatus("⚠ " + msg);
+      setStatus("Error — " + msg);
     } finally {
       setBusy(false);
     }
@@ -95,18 +140,16 @@ export default function App() {
       const x = (leverageBps / 10000).toFixed(2);
       setMandateMsg(
         r.allowed
-          ? { refused: false, text: `✓ Allowed — ${x}× is within your mandate.` }
+          ? { tone: "allowed", text: `${x}× is within your mandate.` }
           : agentPaused
-          ? { refused: true, text: "⛔ Agent is paused — no trade is possible until you resume it." }
+          ? { tone: "paused", text: "No trade is possible until you resume the agent." }
           : {
-              refused: true,
-              text: `⛔ Refused by your mandate — ${x}× exceeds your ${terms?.maxLeverageX.toFixed(
-                2,
-              )}× cap. The contract reverted on-chain; no trade happened.`,
+              tone: "refused",
+              text: `${x}× exceeds your ${terms?.maxLeverageX.toFixed(2)}× cap. The contract reverted on-chain — no trade happened.`,
             },
       );
     } catch (e: any) {
-      setMandateMsg({ refused: true, text: "⚠ " + (e?.message ?? String(e)) });
+      setMandateMsg({ tone: "refused", text: e?.message ?? String(e) });
     } finally {
       setBusy(false);
     }
@@ -126,7 +169,7 @@ export default function App() {
       setMandateMsg(null);
       setTerms(await readTerms());
       await loadActivity();
-      setStatus("✓ Your mandate is live at " + addr.slice(0, 10) + "…");
+      setStatus("Your mandate is live at " + addr.slice(0, 10) + "…");
     });
 
   const toggleAgent = () =>
@@ -135,11 +178,11 @@ export default function App() {
       if (agentPaused) {
         await resumeAgent(wallet);
         setAgentPaused(false);
-        setStatus("✓ Agent resumed.");
+        setStatus("Agent resumed.");
       } else {
         await pauseAgent(wallet);
         setAgentPaused(true);
-        setStatus("✓ Agent paused — no trades possible until you resume.");
+        setStatus("Agent paused — no trades possible until you resume.");
       }
       setMandateMsg(null);
     });
@@ -154,7 +197,7 @@ export default function App() {
       });
       setTerms(await readTerms());
       setMandateMsg(null);
-      setStatus("✓ Limits updated on-chain.");
+      setStatus("Limits updated on-chain.");
     });
 
   const setupTrading = () =>
@@ -172,63 +215,92 @@ export default function App() {
     run("Opening BTC long on Perpl", async () => {
       if (!wallet) return;
       const tx = await openLong(wallet, { marketId: PERPL.marketIds.BTC, sizeScaled: 10 });
-      setStatus("✓ Long opened on Perpl · tx " + tx.slice(0, 10) + "…");
+      setStatus("Long opened on Perpl · tx " + tx.slice(0, 10) + "…");
       await refreshBalance(wallet);
       if (creds) setPortfolio(await fetchPortfolio(creds));
     });
 
   const funded = balance != null && Number(balance) >= MIN_AUSD;
 
+  if (!fontsLoaded && !fontError) {
+    return (
+      <View style={[styles.screen, styles.center]}>
+        <ActivityIndicator color={C.accent} />
+      </View>
+    );
+  }
+
   return (
     <View style={styles.screen}>
       <StatusBar style="light" />
-      <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.brand}>CHARTER</Text>
+      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+        <View style={styles.header}>
+          <View style={styles.brandRow}>
+            <View style={styles.mark} />
+            <Text style={styles.brand}>CHARTER</Text>
+          </View>
+          <Chip label="Monad testnet" tone="dot" />
+        </View>
         <Text style={styles.tagline}>Automated investing, with a guarantee.</Text>
 
         {!wallet ? (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Sign in</Text>
-            <Text style={styles.muted}>Your account is a passkey — no seed phrase, no password.</Text>
+            <Text style={styles.body}>Your account is a passkey — no seed phrase, no password, no extension.</Text>
             <Button label="Enter with Face ID" onPress={() => enter(false)} disabled={busy} />
             <Button label="Create a new account" variant="ghost" onPress={() => enter(true)} disabled={busy} />
           </View>
         ) : (
           <>
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Account</Text>
+              <View style={styles.cardHead}>
+                <Text style={styles.eyebrow}>ACCOUNT</Text>
+                <Pressable
+                  onPress={() => run("Refreshing", async () => {
+                    await refreshBalance(wallet);
+                    await loadActivity();
+                    if (creds) setPortfolio(await fetchPortfolio(creds));
+                  })}
+                  disabled={busy}
+                  hitSlop={10}
+                >
+                  <Text style={styles.link}>Refresh</Text>
+                </Pressable>
+              </View>
+              <Text style={styles.balance}>
+                {balance ?? "—"} <Text style={styles.unit}>AUSD</Text>
+              </Text>
               <Text selectable style={styles.mono}>{wallet.address}</Text>
-              <Text style={styles.balance}>{balance ?? "—"} <Text style={styles.ausd}>AUSD</Text></Text>
-              <Button label="Refresh" variant="ghost" onPress={() => run("Refreshing", async () => {
-                await refreshBalance(wallet);
-                await loadActivity();
-                if (creds) setPortfolio(await fetchPortfolio(creds));
-              })} disabled={busy} />
             </View>
 
             {terms && (
               <View style={styles.card}>
                 <Text style={styles.cardTitle}>Your mandate</Text>
-                <Text style={styles.muted}>
-                  Max {terms.maxLeverageX.toFixed(2)}× leverage · Max {terms.maxSlippagePct.toFixed(2)}% slippage · Hedge at {terms.drawdownPct.toFixed(0)}% drawdown
-                </Text>
-                <Text style={styles.muted}>Enforced on-chain — your agent cannot exceed it.</Text>
-                <Button label="Agent: attempt a 3× long" onPress={propose(30000)} disabled={busy} />
-                <Button label="Agent: a 1.5× long" variant="ghost" onPress={propose(15000)} disabled={busy} />
-                {mandateMsg && (
-                  <Text style={mandateMsg.refused ? styles.refused : styles.allowed}>{mandateMsg.text}</Text>
-                )}
+                <View style={styles.metricRow}>
+                  <Metric value={`${terms.maxLeverageX.toFixed(2)}×`} label="MAX LEVERAGE" />
+                  <Metric value={`${terms.maxSlippagePct.toFixed(2)}%`} label="MAX SLIPPAGE" divider />
+                  <Metric value={`${terms.drawdownPct.toFixed(0)}%`} label="HEDGE AT" divider />
+                </View>
+                <View style={styles.pillRow}>
+                  <Chip label="Enforced on-chain" tone="accent" />
+                  <Text style={styles.bodyFaint}>your agent cannot exceed it</Text>
+                </View>
+                <View style={styles.btnRow}>
+                  <Button label="Attempt 3×" onPress={propose(30000)} disabled={busy} variant="ghost" flex />
+                  <Button label="Try 1.5×" onPress={propose(15000)} disabled={busy} variant="ghost" flex />
+                </View>
+                {mandateMsg && <Banner tone={mandateMsg.tone} text={mandateMsg.text} />}
               </View>
             )}
 
             {terms && !ownsMandate && (
               <View style={styles.card}>
                 <Text style={styles.cardTitle}>Create your own mandate</Text>
-                <Text style={styles.muted}>Set your limits and deploy a mandate you own, on-chain.</Text>
+                <Text style={styles.body}>Set your limits and deploy a mandate you own, on-chain.</Text>
                 <View style={styles.inputRow}>
-                  <Field label="Max lev ×" value={myLev} onChange={setMyLev} />
-                  <Field label="Max slip %" value={mySlip} onChange={setMySlip} />
-                  <Field label="Hedge %" value={myDd} onChange={setMyDd} />
+                  <Field label="MAX LEV ×" value={myLev} onChange={setMyLev} />
+                  <Field label="MAX SLIP %" value={mySlip} onChange={setMySlip} />
+                  <Field label="HEDGE %" value={myDd} onChange={setMyDd} />
                 </View>
                 <Button label="Deploy my mandate" onPress={deployMine} disabled={busy} />
               </View>
@@ -236,50 +308,73 @@ export default function App() {
 
             {terms && ownsMandate && (
               <View style={styles.card}>
-                <Text style={styles.cardTitle}>Manage your mandate</Text>
-                {myMandate && <Text style={styles.allowed}>✓ Live at {myMandate.slice(0, 10)}… — you own it.</Text>}
-                <Text style={styles.muted}>
-                  {agentPaused ? "Agent is paused — it cannot trade." : "Agent is active, bounded by your limits."}
-                </Text>
-                <Button label={agentPaused ? "Resume agent" : "Pause agent (kill switch)"} onPress={toggleAgent} disabled={busy} />
-                <Text style={styles.muted}>Adjust your limits — enforced on-chain the moment you save.</Text>
-                <View style={styles.inputRow}>
-                  <Field label="Max lev ×" value={myLev} onChange={setMyLev} />
-                  <Field label="Max slip %" value={mySlip} onChange={setMySlip} />
-                  <Field label="Hedge %" value={myDd} onChange={setMyDd} />
+                <View style={styles.cardHead}>
+                  <Text style={styles.cardTitle}>Manage your mandate</Text>
+                  <Chip label="You own this" tone="pos" />
                 </View>
-                <Button label="Update limits" variant="ghost" onPress={updateLimits} disabled={busy} />
+                {myMandate && <Text style={styles.mono}>{myMandate}</Text>}
+                <View style={styles.statusRow}>
+                  <View style={[styles.dot, { backgroundColor: agentPaused ? C.neg : C.pos }]} />
+                  <Text style={styles.body}>
+                    {agentPaused ? "Agent is paused — it cannot trade." : "Agent is active, bounded by your limits."}
+                  </Text>
+                </View>
+                <Button
+                  label={agentPaused ? "Resume agent" : "Pause agent · kill switch"}
+                  onPress={toggleAgent}
+                  disabled={busy}
+                  variant={agentPaused ? "primary" : "danger"}
+                />
+                <View style={styles.divider} />
+                <Text style={styles.eyebrow}>ADJUST LIMITS</Text>
+                <Text style={styles.bodyFaint}>Enforced on-chain the moment you save.</Text>
+                <View style={styles.inputRow}>
+                  <Field label="MAX LEV ×" value={myLev} onChange={setMyLev} />
+                  <Field label="MAX SLIP %" value={mySlip} onChange={setMySlip} />
+                  <Field label="HEDGE %" value={myDd} onChange={setMyDd} />
+                </View>
+                <Button label="Update limits" onPress={updateLimits} disabled={busy} variant="ghost" />
               </View>
             )}
 
             {stats && (
               <View style={styles.card}>
                 <Text style={styles.cardTitle}>Track record</Text>
-                <Text style={styles.balance}>{stats.total} <Text style={styles.ausd}>decisions</Text></Text>
-                <Text style={styles.allowed}>✓ 0 breaches — every one stayed within your mandate</Text>
+                <Text style={styles.balance}>
+                  {stats.total} <Text style={styles.unit}>decisions</Text>
+                </Text>
+                <View style={styles.seal}>
+                  <View style={[styles.dot, { backgroundColor: C.pos }]} />
+                  <Text style={styles.sealText}>0 breaches — every one stayed within your mandate</Text>
+                </View>
                 {terms && (
-                  <Text style={styles.muted}>
-                    Peak leverage {stats.peakLeverageX.toFixed(2)}× / {terms.maxLeverageX.toFixed(2)}× cap · Peak slippage {stats.peakSlippagePct.toFixed(2)}% / {terms.maxSlippagePct.toFixed(2)}% cap
-                  </Text>
+                  <View style={styles.metricRow}>
+                    <Metric value={`${stats.peakLeverageX.toFixed(2)}×`} label={`PEAK · ${terms.maxLeverageX.toFixed(1)}× CAP`} />
+                    <Metric value={`${stats.peakSlippagePct.toFixed(2)}%`} label={`PEAK · ${terms.maxSlippagePct.toFixed(1)}% CAP`} divider />
+                    <Metric value={`${stats.acted}/${stats.abstained}`} label="ACTED / HELD" divider />
+                  </View>
                 )}
-                <Text style={styles.muted}>{stats.acted} acted · {stats.abstained} abstained · all verifiable on-chain</Text>
+                <Text style={styles.bodyFaint}>All verifiable on-chain — not a self-reported number.</Text>
               </View>
             )}
 
             {decisions.length > 0 && (
               <View style={styles.card}>
                 <Text style={styles.cardTitle}>Agent activity</Text>
-                <Text style={styles.muted}>Every decision your agent makes — recorded on-chain.</Text>
-                {decisions.map((d) => (
-                  <View key={d.seq} style={styles.decisionRow}>
-                    <Text style={styles.decisionSeq}>#{d.seq}</Text>
-                    <Text style={styles.decisionText}>
-                      {d.acted
-                        ? `${d.action} · ${d.leverageX.toFixed(2)}× · ${d.slippagePct}%`
-                        : `Abstained — ${d.reason}`}
-                    </Text>
-                  </View>
-                ))}
+                <Text style={styles.bodyFaint}>Every decision your agent makes — recorded on-chain.</Text>
+                <View style={styles.feed}>
+                  {decisions.map((d) => (
+                    <View key={d.seq} style={styles.decisionRow}>
+                      <View style={[styles.dot, { backgroundColor: d.acted ? C.accent : C.faint }]} />
+                      <Text style={styles.decisionSeq}>#{d.seq}</Text>
+                      <Text style={styles.decisionText} numberOfLines={1}>
+                        {d.acted
+                          ? `${d.action} · ${d.leverageX.toFixed(2)}× · ${d.slippagePct}%`
+                          : `Abstained — ${d.reason}`}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
               </View>
             )}
 
@@ -291,29 +386,49 @@ export default function App() {
                 </Text>
               )}
               <Button label="Set up trading account" onPress={setupTrading} disabled={busy || !funded} />
-              <Button label="Open BTC long" onPress={trade} disabled={busy || !accountReady} />
+              <Button label="Open BTC long" onPress={trade} disabled={busy || !accountReady} variant="ghost" />
             </View>
 
             {portfolio && (
               <View style={styles.card}>
                 <Text style={styles.cardTitle}>Portfolio</Text>
-                <Text style={styles.balance}>{portfolio.accountValue.toFixed(2)} <Text style={styles.ausd}>AUSD</Text></Text>
-                <Text style={styles.muted}>
-                  Realized PnL {portfolio.realizedPnl >= 0 ? "+" : ""}{portfolio.realizedPnl.toFixed(2)} AUSD · Volume {portfolio.volume.toFixed(0)} · {portfolio.openPositions} open position{portfolio.openPositions === 1 ? "" : "s"}
+                <Text style={styles.balance}>
+                  {portfolio.accountValue.toFixed(2)} <Text style={styles.unit}>AUSD</Text>
                 </Text>
+                <View style={styles.metricRow}>
+                  <Metric
+                    value={`${portfolio.realizedPnl >= 0 ? "+" : ""}${portfolio.realizedPnl.toFixed(2)}`}
+                    label="REALIZED PNL"
+                    tone={portfolio.realizedPnl >= 0 ? "pos" : "neg"}
+                  />
+                  <Metric value={portfolio.volume.toFixed(0)} label="VOLUME" divider />
+                  <Metric value={`${portfolio.openPositions}`} label="OPEN" divider />
+                </View>
               </View>
             )}
           </>
         )}
 
-        {busy && <ActivityIndicator style={{ marginTop: 16 }} color="#7C9CFF" />}
+        {busy && <ActivityIndicator style={{ marginTop: 8 }} color={C.accent} />}
         {status ? <Text style={styles.status}>{status}</Text> : null}
       </ScrollView>
     </View>
   );
 }
 
-function Button({ label, onPress, disabled, variant }: { label: string; onPress: () => void; disabled?: boolean; variant?: "ghost" }) {
+function Button({
+  label,
+  onPress,
+  disabled,
+  variant = "primary",
+  flex,
+}: {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+  variant?: "primary" | "ghost" | "danger";
+  flex?: boolean;
+}) {
   return (
     <Pressable
       onPress={onPress}
@@ -321,10 +436,21 @@ function Button({ label, onPress, disabled, variant }: { label: string; onPress:
       style={({ pressed }) => [
         styles.btn,
         variant === "ghost" && styles.btnGhost,
-        (disabled || pressed) && { opacity: 0.6 },
+        variant === "danger" && styles.btnDanger,
+        flex && { flex: 1 },
+        pressed && { opacity: 0.85 },
+        disabled && { opacity: 0.4 },
       ]}
     >
-      <Text style={[styles.btnText, variant === "ghost" && styles.btnGhostText]}>{label}</Text>
+      <Text
+        style={[
+          styles.btnText,
+          variant === "ghost" && styles.btnGhostText,
+          variant === "danger" && styles.btnDangerText,
+        ]}
+      >
+        {label}
+      </Text>
     </Pressable>
   );
 }
@@ -333,35 +459,123 @@ function Field({ label, value, onChange }: { label: string; value: string; onCha
   return (
     <View style={styles.field}>
       <Text style={styles.fieldLabel}>{label}</Text>
-      <TextInput value={value} onChangeText={onChange} keyboardType="decimal-pad" style={styles.input} />
+      <TextInput
+        value={value}
+        onChangeText={onChange}
+        keyboardType="decimal-pad"
+        selectTextOnFocus
+        style={styles.input}
+        placeholderTextColor={C.faint}
+      />
+    </View>
+  );
+}
+
+function Metric({ value, label, divider, tone }: { value: string; label: string; divider?: boolean; tone?: "pos" | "neg" }) {
+  return (
+    <View style={[styles.metric, divider && styles.metricDivider]}>
+      <Text style={[styles.metricValue, tone === "pos" && { color: C.pos }, tone === "neg" && { color: C.neg }]}>{value}</Text>
+      <Text style={styles.metricLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function Chip({ label, tone }: { label: string; tone?: "accent" | "pos" | "dot" }) {
+  return (
+    <View style={[styles.chip, tone === "accent" && styles.chipAccent, tone === "pos" && styles.chipPos]}>
+      {tone === "dot" && <View style={[styles.dot, { backgroundColor: C.pos }]} />}
+      <Text
+        style={[styles.chipText, tone === "accent" && { color: C.accent }, tone === "pos" && { color: C.pos }]}
+      >
+        {label}
+      </Text>
+    </View>
+  );
+}
+
+function Banner({ tone, text }: { tone: MsgTone; text: string }) {
+  const pos = tone === "allowed";
+  const title = tone === "allowed" ? "ALLOWED" : tone === "paused" ? "AGENT PAUSED" : "REFUSED ON-CHAIN";
+  return (
+    <View style={[styles.banner, { backgroundColor: pos ? C.posSoft : C.negSoft }]}>
+      <View style={[styles.bannerBar, { backgroundColor: pos ? C.pos : C.neg }]} />
+      <View style={styles.bannerBody}>
+        <Text style={[styles.bannerTitle, { color: pos ? C.pos : C.neg }]}>{title}</Text>
+        <Text style={styles.bannerText}>{text}</Text>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#0B0D12" },
-  container: { padding: 24, paddingTop: 72, gap: 16 },
-  brand: { color: "#F5F7FF", fontSize: 28, fontWeight: "800", letterSpacing: 2 },
-  tagline: { color: "#8A93A6", fontSize: 15, marginBottom: 12 },
-  card: { backgroundColor: "#141822", borderRadius: 16, padding: 20, gap: 12, borderWidth: 1, borderColor: "#1F2533" },
-  cardTitle: { color: "#F5F7FF", fontSize: 18, fontWeight: "700" },
-  muted: { color: "#8A93A6", fontSize: 14 },
-  warn: { color: "#E8B04B", fontSize: 14 },
-  mono: { color: "#AEB6C7", fontFamily: "monospace", fontSize: 14 },
-  balance: { color: "#F5F7FF", fontSize: 40, fontWeight: "800" },
-  ausd: { color: "#7C9CFF", fontSize: 20, fontWeight: "700" },
-  btn: { backgroundColor: "#3B61FF", borderRadius: 12, paddingVertical: 14, alignItems: "center" },
-  btnText: { color: "#fff", fontSize: 16, fontWeight: "700" },
-  btnGhost: { backgroundColor: "transparent", borderWidth: 1, borderColor: "#2A3142" },
-  btnGhostText: { color: "#AEB6C7" },
-  status: { color: "#AEB6C7", fontSize: 14, marginTop: 16, textAlign: "center" },
-  refused: { color: "#FF6B6B", fontSize: 15, fontWeight: "700" },
-  allowed: { color: "#5BD6A0", fontSize: 15, fontWeight: "700" },
-  decisionRow: { flexDirection: "row", gap: 10, alignItems: "baseline" },
-  decisionSeq: { color: "#5A6478", fontFamily: "monospace", fontSize: 12, width: 28 },
-  decisionText: { color: "#AEB6C7", fontSize: 14, flex: 1 },
+  screen: { flex: 1, backgroundColor: C.bg },
+  center: { alignItems: "center", justifyContent: "center" },
+  container: { padding: 20, paddingTop: (RNStatusBar.currentHeight ?? 24) + 24, paddingBottom: 56, gap: 14 },
+
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  brandRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  mark: { width: 22, height: 22, borderRadius: 7, backgroundColor: C.accent, transform: [{ rotate: "45deg" }] },
+  brand: { color: C.text, fontSize: 22, fontFamily: F.extrabold, letterSpacing: 3 },
+  tagline: { color: C.muted, fontFamily: F.regular, fontSize: 15, marginTop: -6, marginBottom: 6 },
+
+  card: { backgroundColor: C.surface, borderRadius: 20, padding: 20, gap: 14, borderWidth: 1, borderColor: C.borderSoft },
+  cardHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  cardTitle: { color: C.text, fontSize: 17, fontFamily: F.bold, letterSpacing: 0.2 },
+  eyebrow: { color: C.faint, fontSize: 11, fontFamily: F.semibold, letterSpacing: 1.4 },
+  body: { color: C.muted, fontFamily: F.regular, fontSize: 14, lineHeight: 21 },
+  bodyFaint: { color: C.faint, fontFamily: F.regular, fontSize: 13, lineHeight: 19 },
+  warn: { color: C.warn, fontFamily: F.medium, fontSize: 13.5, lineHeight: 20 },
+  link: { color: C.accent, fontFamily: F.semibold, fontSize: 14 },
+
+  balance: { color: C.text, fontSize: 40, fontFamily: F.bold, letterSpacing: -1, fontVariant: ["tabular-nums"] },
+  unit: { color: C.accent, fontSize: 18, fontFamily: F.semibold, letterSpacing: 0 },
+  mono: { color: C.muted, fontFamily: "monospace", fontSize: 12.5, letterSpacing: -0.2 },
+
+  // metric row (Robinhood/Mercury-style stat strip)
+  metricRow: { flexDirection: "row", backgroundColor: C.inputBg, borderRadius: 14, borderWidth: 1, borderColor: C.borderSoft, paddingVertical: 14 },
+  metric: { flex: 1, alignItems: "center", gap: 3, paddingHorizontal: 6 },
+  metricDivider: { borderLeftWidth: 1, borderLeftColor: C.border },
+  metricValue: { color: C.text, fontSize: 18, fontFamily: F.bold, fontVariant: ["tabular-nums"] },
+  metricLabel: { color: C.faint, fontSize: 9.5, fontFamily: F.semibold, letterSpacing: 0.6, textAlign: "center" },
+
+  pillRow: { flexDirection: "row", alignItems: "center", gap: 10, flexWrap: "wrap" },
+  statusRow: { flexDirection: "row", alignItems: "center", gap: 9 },
+  dot: { width: 7, height: 7, borderRadius: 4 },
+
+  btnRow: { flexDirection: "row", gap: 10 },
+  btn: { backgroundColor: C.accent, borderRadius: 14, paddingVertical: 15, alignItems: "center", justifyContent: "center" },
+  btnText: { color: "#fff", fontSize: 15, fontFamily: F.semibold, letterSpacing: 0.2 },
+  btnGhost: { backgroundColor: "transparent", borderWidth: 1, borderColor: C.border },
+  btnGhostText: { color: C.text },
+  btnDanger: { backgroundColor: C.negSoft, borderWidth: 1, borderColor: "rgba(255,90,90,0.4)" },
+  btnDangerText: { color: C.neg },
+
+  chip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, borderWidth: 1, borderColor: C.border },
+  chipAccent: { backgroundColor: C.accentSoft, borderColor: "transparent" },
+  chipPos: { backgroundColor: C.posSoft, borderColor: "transparent" },
+  chipText: { color: C.muted, fontSize: 11.5, fontFamily: F.semibold, letterSpacing: 0.2 },
+
+  // the hero: refusal / allowed banner
+  banner: { flexDirection: "row", borderRadius: 13, overflow: "hidden", marginTop: 2 },
+  bannerBar: { width: 4 },
+  bannerBody: { flex: 1, paddingVertical: 12, paddingHorizontal: 14, gap: 3 },
+  bannerTitle: { fontSize: 12, fontFamily: F.bold, letterSpacing: 1 },
+  bannerText: { color: C.text, fontSize: 13.5, fontFamily: F.regular, lineHeight: 19 },
+
+  seal: { flexDirection: "row", alignItems: "center", gap: 9, backgroundColor: C.posSoft, borderRadius: 12, paddingVertical: 11, paddingHorizontal: 13 },
+  sealText: { color: C.pos, fontSize: 13.5, fontFamily: F.semibold, flex: 1 },
+
+  feed: { gap: 11, marginTop: 2 },
+  decisionRow: { flexDirection: "row", gap: 10, alignItems: "center" },
+  decisionSeq: { color: C.faint, fontFamily: "monospace", fontSize: 12, width: 32, fontVariant: ["tabular-nums"] },
+  decisionText: { color: C.muted, fontFamily: F.regular, fontSize: 13.5, flex: 1 },
+
+  divider: { height: 1, backgroundColor: C.border, marginVertical: 2 },
+
   inputRow: { flexDirection: "row", gap: 10 },
-  field: { flex: 1, gap: 4 },
-  fieldLabel: { color: "#8A93A6", fontSize: 12 },
-  input: { backgroundColor: "#0B0D12", borderWidth: 1, borderColor: "#2A3142", borderRadius: 10, color: "#F5F7FF", paddingVertical: 10, paddingHorizontal: 12, fontSize: 16 },
+  field: { flex: 1, gap: 6 },
+  fieldLabel: { color: C.faint, fontSize: 10, fontFamily: F.semibold, letterSpacing: 0.6 },
+  input: { backgroundColor: C.inputBg, borderWidth: 1, borderColor: C.border, borderRadius: 12, color: C.text, paddingVertical: 12, paddingHorizontal: 13, fontSize: 17, fontFamily: F.semibold, textAlign: "center", fontVariant: ["tabular-nums"] },
+
+  status: { color: C.muted, fontFamily: F.regular, fontSize: 13.5, marginTop: 8, textAlign: "center" },
 });
