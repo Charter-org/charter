@@ -34,8 +34,11 @@ Built for the **Monad Metropolis Hackathon** — Track 01, Onchain Finance & Tra
   public `Decision` event, shown in-app.
 - **Proof-of-performance.** A provable track record: how many decisions the agent made and that it
   **never once breached your limits** — read straight from the on-chain log, not a self-reported number.
-- **Real Perpl trade.** Set up a trading account and open a BTC perp long — a real on-chain `execOrder`.
-- **Portfolio.** Account value, realized PnL, volume, open positions — from Perpl's authenticated API.
+- **Real Perpl trade, through your mandate.** Set up a trading account the mandate custodies, then open a
+  long or short on BTC/ETH/SOL/MON/ZEC — a real on-chain `execOrder` the mandate sends via `execPerplOrder`,
+  with leverage capped on-chain. An order above your limit reverts before any funds move.
+- **Portfolio, read on-chain.** Account value, unrealized PnL, open positions — read straight from Perpl's
+  contracts (the mandate is the account holder), not a self-reported number.
 - **Deploy your own mandate, and stay in control.** Deploy a mandate _you own_ on-chain, then **pause
   the agent instantly** (a kill switch) or adjust your limits live — all owner-only, enforced on-chain.
 
@@ -48,15 +51,16 @@ flowchart LR
     M["Mandate.sol<br/>leverage · slippage · drawdown"]
     EX[Perpl exchange]
   end
+  W -->|execPerplOrder · bounds-checked| M
   AG[Agent keeper] -->|act / abstain every tick| M
-  M -->|reverts if breached| AG
+  M -->|reverts if over leverage| W
+  M -->|execOrder · mandate holds the account| EX
   M -->|Decision events| FEED[In-app activity feed]
-  W -->|execOrder| EX
-  M -.the agent is bound by.- EX
 ```
 
-The mandate is the trust primitive: the agent (a bot) can only act _within_ it, and every decision is
-on-chain for anyone to replay. A compromised or buggy agent still can't exceed your limits.
+The mandate is the trust primitive: it **custodies the collateral and holds the Perpl account**, and
+both the agent and the owner can only trade through `execPerplOrder`, which caps leverage on-chain. A
+compromised or buggy agent still can't exceed your limits — the order reverts before any funds move.
 
 ## Proven on-chain — don't trust, verify
 
@@ -65,19 +69,21 @@ All on **Monad testnet** (chainId 10143, [explorer](https://testnet.monadexplore
 - **Mandate** (agent-operated): [`0x564EFe…A648`](https://testnet.monadexplorer.com/address/0x564EFe00cfF81eaF6A65422758C27A0c89EAA648)
   — every `Decision` event is an agent move; a 3× proposal reverts `LeverageExceeded` (`0x6881ba1f`).
 - **Perpl exchange:** [`0x1964…80cc`](https://testnet.monadexplorer.com/address/0x1964C32f0bE608E7D29302AFF5E61268E72080cc)
-  — real `execOrder` BTC longs placed from a passkey account.
+  — real `execOrder` perp trades on Monad; in the custody build the mandate holds the Perpl account and sends
+  every order through `execPerplOrder` (leverage capped on-chain).
 - Full deployment + evidence: [`deployments/monad-testnet.json`](deployments/monad-testnet.json).
 
-The custody/executed-trade enforcement (a breach reverts a _real_ spot trade, not just a log) is
-implemented and unit-tested in [`test/MandateExecution.t.sol`](test/MandateExecution.t.sol); the kill
-switch and live limit-tightening are tested too — 16/16 pass.
+The custody enforcement — a breach reverts a _real_ trade, not just a log — is implemented and unit-tested
+in [`test/MandateExecution.t.sol`](test/MandateExecution.t.sol): both the spot path (`executeSwap` reverts
+when the fill breaches the slippage floor) and the perp path (`execPerplOrder` reverts `LeverageExceeded`
+before the order is sent). The kill switch and live limit-tightening are tested too — 19/19 pass.
 
 ## Built on — and the bounties it targets
 
 | Integration | What Charter uses it for | Bounty |
 | --- | --- | --- |
 | **Mera** | passkey → EVM account, no seed/extension/backend | Monad "Best Mera-Powered UX" |
-| **Perpl** | real perp trade (`execOrder`) + authed portfolio API | "Best use of Perpl's API" |
+| **Perpl** | real perp trades (`execOrder`) + on-chain account/position reads | "Best use of Perpl's API" |
 | **The Mandate** | on-chain leverage/slippage/drawdown enforcement + auto-hedge | **Perpl "Best Analytics / Risk Tool"** |
 | **AUSD** (Agora) | the displayed balance _and_ Perpl collateral (one token) | Agora "Best Mobile Trading App" |
 | **Monad** | per-block agent decisions, fully on-chain | Track 01, Onchain Finance & Trading |

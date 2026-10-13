@@ -11,7 +11,7 @@
     "actWithinBoundsTx": "0xec29d8ed43d98e5ea502f33a1a4b3bd3fbe52e65b2f236abac9bf0cb27716532",
     "abstainTx": "0xf4748c945b1bda36402c73afe03ce5b89e03d024decdbd4f4d683722cdf7b4d6",
     "leverageRefusal": "act() at 2.50x leverage reverts LeverageExceeded (selector 0x6881ba1f)",
-    "custodyNote": "This build adds fund custody + executeSwap, which reverts a real spot trade when the realized fill breaches the slippage floor (proven in test/MandateExecution.t.sol). Exercising that refusal on-chain needs test USDC, an allowlisted Kuru router call, and a deployed IPriceSource adapter — wired in the next phase."
+    "custodyNote": "The mandate custodies collateral and holds its own Perpl account; the agent can only trade through execPerplOrder (perps) or executeSwap (spot), both bounded on-chain. A breach reverts before any funds move — unit-tested in test/MandateExecution.t.sol (19/19 pass, incl. execPerplOrder LeverageExceeded). The mobile app deploys a user-owned custody mandate and routes manual trades through it, reading positions/PnL on-chain (app/lib/trade.ts)."
   },
   "appMandate": {
     "Mandate": "0x37a0873e8d04796F7D1991B18A23C9364b5107af",

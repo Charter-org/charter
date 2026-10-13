@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
-import {Mandate} from "../src/Mandate.sol";
+import {Mandate, PerplOrder} from "../src/Mandate.sol";
 import {IERC20} from "../src/interfaces/IERC20.sol";
 import {IPriceSource} from "../src/interfaces/IPriceSource.sol";
 
@@ -54,6 +54,11 @@ contract MockPriceSource {
     function expectedOut(address, address, uint256 amountIn) external pure returns (uint256) {
         return amountIn;
     }
+}
+
+/// Stateless Perpl exchange stand-in; etched over PERPL_EXCHANGE so execOrder has code to call.
+contract MockPerplExchange {
+    function execOrder(PerplOrder calldata) external {}
 }
 
 contract MandateExecutionTest is Test {
@@ -141,5 +146,29 @@ contract MandateExecutionTest is Test {
         mandate.executeSwap(
             address(router), IERC20(address(tokenIn)), IERC20(address(tokenOut)), 100e18, _swapCalldata(100e18)
         );
+    }
+
+    // --- perp custody (execPerplOrder): the mandate holds the Perpl account; leverage is capped on-chain ---
+
+    // 3x (300 hdths = 30_000 bps) over the 2x cap reverts BEFORE the exchange is ever called — no funds move.
+    function test_execPerplOrder_overLeverage_reverts() public {
+        vm.prank(agent);
+        vm.expectRevert(abi.encodeWithSelector(Mandate.LeverageExceeded.selector, 30_000, 20_000));
+        mandate.execPerplOrder(0, 16, 1e18, 1e6, 300, 500);
+    }
+
+    // At the 2x cap the order is forwarded to the exchange and the decision is recorded.
+    function test_execPerplOrder_withinBounds_succeeds() public {
+        vm.etch(mandate.PERPL_EXCHANGE(), address(new MockPerplExchange()).code);
+        vm.prank(agent);
+        uint256 seq = mandate.execPerplOrder(0, 16, 1e18, 1e6, 200, 500);
+        assertEq(seq, 1);
+        assertEq(mandate.decisionCount(), 1);
+    }
+
+    function test_execPerplOrder_onlyAgent() public {
+        vm.prank(address(0x9999));
+        vm.expectRevert(Mandate.NotAgent.selector);
+        mandate.execPerplOrder(0, 16, 1e18, 1e6, 200, 500);
     }
 }
