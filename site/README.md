@@ -24,20 +24,12 @@ npx vercel --prod    # framework autodetected (Next.js)
 
 ## The APK download
 
-The "Download" buttons serve `public/charter-android.apk` **same-origin** (no GitHub redirect). The APK
-is **gitignored** (repo policy: `*.apk` lives on Releases, not git). The Vercel CLI uploads files from
-the working dir regardless of `.gitignore`, so `npx vercel --prod` ships it. If you deploy via the
-**GitHub integration** instead, the file won't be in the repo — commit it, use Git LFS, or redirect to a
-bucket/Release asset.
+The "Download" buttons point at the on-domain path **`/charter-android.apk`**, which `next.config.mjs`
+redirects to the APK hosted in **Vercel Blob** (public). The binary stays out of git (Vercel's build
+couldn't smudge Git LFS, and a 74 MB blob doesn't belong in history).
 
-Update the build (stable filename keeps every link working):
-
-```
-cp charter-vX.Y.Z.apk site/public/charter-android.apk
-```
-
-The file currently in place is the **v0.2.0** build (that's what was available locally); drop in v0.3.0
-to match the latest Release.
+To ship a new build: upload the APK to the Blob store (`npx vercel blob put ./charter-vX.Y.Z.apk`, or the
+dashboard) and update `APK_BLOB_URL` in `next.config.mjs`. Current build: **v0.3.0**.
 
 ## Favicon
 
