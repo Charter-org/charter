@@ -1,6 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Linking,
+  Modal,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -144,6 +146,7 @@ export default function App() {
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
   const [positions, setPositions] = useState<OpenPosition[]>([]);
   const [fills, setFills] = useState<Fill[]>([]);
+  const [selectedFill, setSelectedFill] = useState<Fill | null>(null);
   const [market, setMarket] = useState<Market>("BTC");
   const [side, setSide] = useState<Side>("long");
   const [amount, setAmount] = useState("25");
@@ -588,12 +591,13 @@ export default function App() {
                   <Text style={styles.bodyFaint}>Your manual Perpl trades, settled on-chain.</Text>
                   <View style={styles.feed}>
                     {fills.map((f, i) => (
-                      <View key={`${f.txid}-${i}`} style={styles.decisionRow}>
+                      <Pressable key={`${f.txHash}-${i}`} onPress={() => setSelectedFill(f)} style={({ pressed }) => [styles.decisionRow, pressed && { opacity: 0.6 }]}>
                         <View style={[styles.dot, { backgroundColor: f.side === "short" ? C.accent : C.pos }]} />
                         <Text style={styles.decisionText} numberOfLines={1}>
-                          {f.action} {f.symbol} {f.side} · ${(f.size * f.priceUsd).toFixed(2)}
+                          {f.action} {f.symbol} {f.side} · ${f.notionalUsd.toFixed(2)}
                         </Text>
-                      </View>
+                        <Text style={styles.rowChevron}>›</Text>
+                      </Pressable>
                     ))}
                   </View>
                 </View>
@@ -700,6 +704,30 @@ export default function App() {
             {status ? <Text style={styles.toastText} numberOfLines={2}>{status}</Text> : null}
           </View>
         )}
+
+        <Modal visible={!!selectedFill} transparent animationType="slide" onRequestClose={() => setSelectedFill(null)}>
+          <Pressable style={styles.modalBackdrop} onPress={() => setSelectedFill(null)}>
+            <Pressable style={styles.sheet} onPress={() => {}}>
+              {selectedFill && (
+                <>
+                  <View style={styles.sheetHead}>
+                    <Chip label={selectedFill.side === "short" ? "SHORT" : "LONG"} tone={selectedFill.side === "short" ? "accent" : "pos"} />
+                    <Text style={styles.sheetTitle}>{selectedFill.action} {selectedFill.symbol}</Text>
+                  </View>
+                  <DetailRow label="Size" value={`${selectedFill.size} ${selectedFill.symbol}`} />
+                  <DetailRow label="Fill price" value={`$${selectedFill.priceUsd.toFixed(2)}`} />
+                  <DetailRow label="Notional" value={`$${selectedFill.notionalUsd.toFixed(2)}`} />
+                  <DetailRow label="Fee" value={`$${selectedFill.feeUsd.toFixed(4)}`} />
+                  <DetailRow label="Time" value={new Date(selectedFill.timeMs).toISOString().replace("T", " ").slice(0, 19) + " UTC"} />
+                  <DetailRow label="Transaction" value={short(selectedFill.txHash)} onPress={() => Linking.openURL(`https://testnet.monadexplorer.com/tx/${selectedFill.txHash}`)} />
+                  <View style={{ height: 8 }} />
+                  <Button label="View on explorer" variant="ghost" onPress={() => Linking.openURL(`https://testnet.monadexplorer.com/tx/${selectedFill.txHash}`)} />
+                  <Button label="Close" onPress={() => setSelectedFill(null)} />
+                </>
+              )}
+            </Pressable>
+          </Pressable>
+        </Modal>
 
         <View style={styles.tabBar}>
           {TABS.map((t) => {
@@ -882,6 +910,18 @@ function Chip({ label, tone }: { label: string; tone?: "accent" | "pos" | "dot" 
   );
 }
 
+function DetailRow({ label, value, onPress }: { label: string; value: string; onPress?: () => void }) {
+  const { styles, C } = useTheme();
+  return (
+    <View style={styles.detailRow}>
+      <Text style={styles.detailLabel}>{label}</Text>
+      <Text style={[styles.detailValue, onPress && { color: C.accent }]} onPress={onPress} numberOfLines={1}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
 function Banner({ tone, text }: { tone: MsgTone; text: string }) {
   const { styles, C } = useTheme();
   const pos = tone === "allowed";
@@ -1016,6 +1056,14 @@ function makeStyles(C: Palette) {
     decisionRow: { flexDirection: "row", gap: 10, alignItems: "center" },
     decisionSeq: { color: C.faint, fontFamily: "monospace", fontSize: 12, width: 32, fontVariant: ["tabular-nums"] },
     decisionText: { color: C.muted, fontFamily: F.regular, fontSize: 13.5, flex: 1 },
+    rowChevron: { color: C.faint, fontSize: 20, marginLeft: 2 },
+    modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
+    sheet: { backgroundColor: C.bg, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 22, paddingBottom: 34, gap: 8, borderWidth: 1, borderBottomWidth: 0, borderColor: C.glassBorder },
+    sheetHead: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 6 },
+    sheetTitle: { color: C.text, fontFamily: F.semibold, fontSize: 18 },
+    detailRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: C.borderSoft },
+    detailLabel: { color: C.muted, fontFamily: F.regular, fontSize: 13 },
+    detailValue: { color: C.text, fontFamily: F.medium, fontSize: 14, flexShrink: 1, textAlign: "right" },
 
     divider: { height: 1, backgroundColor: C.border, marginVertical: 2 },
 

@@ -191,8 +191,10 @@ export interface Fill {
   side: Side;
   size: number;
   priceUsd: number;
+  notionalUsd: number;
+  feeUsd: number;
   timeMs: number;
-  txid: string;
+  txHash: string;
 }
 
 // Fill `t` is the on-chain orderType + 1: 1 OpenLong, 2 OpenShort, 3 CloseLong, 4 CloseShort
@@ -211,14 +213,18 @@ export async function fetchFills(creds: ReadCreds, limit = 12): Promise<Fill[]> 
   const byId = new Map<number, any>((ctx.markets ?? []).map((m: any) => [m.id, m]));
   return (res.d ?? []).slice(0, limit).map((f: any) => {
     const m = byId.get(f.mkt);
+    const size = f.s / 10 ** (m?.config?.size_decimals ?? 0);
+    const priceUsd = f.p / 10 ** (m?.config?.price_decimals ?? 0);
     return {
       marketId: f.mkt,
       symbol: m?.symbol ?? String(f.mkt),
       ...fillMeta(f.t),
-      size: f.s / 10 ** (m?.config?.size_decimals ?? 0),
-      priceUsd: f.p / 10 ** (m?.config?.price_decimals ?? 0),
+      size,
+      priceUsd,
+      notionalUsd: size * priceUsd,
+      feeUsd: Number(f.f ?? 0) / 10 ** PERPL.collateralDecimals,
       timeMs: f.at?.t ?? 0,
-      txid: f.at?.txid ?? "",
+      txHash: f.at?.txid ? "0x" + f.at.txid : "",
     };
   });
 }
