@@ -90,9 +90,10 @@ before the order is sent). The kill switch and live limit-tightening are tested 
 
 ## Try it
 
-- **Install the APK** (Android 13+): see [Releases](https://github.com/Charter-org/charter/releases).
-  Passkey sign-in + the Mandate refusal work with zero funding; the Perpl trade needs testnet MON
-  (`faucet.monad.xyz`) + AUSD.
+- **Install on Android** (9+): the passkey relying-party site is already live, so a standalone APK is one
+  EAS command — see [`app/RUN-ANDROID.md`](app/RUN-ANDROID.md). Passkey sign-in + the Mandate refusal
+  work with zero funding; the Perpl trade needs testnet MON (`faucet.monad.xyz`) + AUSD. Published builds,
+  when cut, are attached to [Releases](https://github.com/Charter-org/charter/releases).
 - **Run from source:** `app/` is an Expo app ([app/README.md](app/README.md)); `keeper/` is the agent
   loop ([keeper/README.md](keeper/README.md)); contracts are Foundry (`forge test`).
 
