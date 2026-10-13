@@ -6,6 +6,6 @@ next-env.d.ts
 .vercel
 .env*.local
 
-# The served APK is tracked via Git LFS (see .gitattributes) so GitHub->Vercel deploys ship it.
-# Root .gitignore has a global *.apk; re-include just this one file.
-!public/charter-android.apk
+# APK is hosted in Vercel Blob; /charter-android.apk redirects there (see next.config.mjs).
+# Keep the binary out of git (root .gitignore already covers *.apk).
+public/*.apk
