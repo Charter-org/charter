@@ -120,7 +120,11 @@ export async function openPosition(wallet: Wallet, opts: { marketId: number; sid
   const isBuy = opts.side === "long";
   const book = await marketPrices(opts.marketId);
   const sizeScaled = sizeFromNotional(opts.notionalUsd, book);
-  if (sizeScaled <= 0) throw new Error(`notional ${opts.notionalUsd} too small for this market`);
+  if (sizeScaled < 1) {
+    // one size-unit is the smallest fillable order; below it the notional rounds to zero size.
+    const minUsd = book.orl / (10 ** book.priceDecimals * 10 ** book.sizeDecimals);
+    throw new Error(`Notional too small - minimum about $${minUsd.toFixed(2)} for this market`);
+  }
   const type = isBuy ? ORDER_TYPE.openLong : ORDER_TYPE.openShort;
   return submitOrder(wallet, buildOrder(opts.marketId, type, marketable(isBuy, book), sizeScaled, opts.leverageHdths ?? 1500));
 }
