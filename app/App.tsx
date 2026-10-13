@@ -24,7 +24,7 @@ import {
 import { isMeraError } from "@category-labs/mera";
 import { signIn, signUp, type Wallet } from "./lib/wallet";
 import { ausdBalance } from "./lib/tokens";
-import { ensureExchangeAccount, exchangeAccountId, openPosition, closePosition, enrollReadKey, fetchPortfolio, fetchPositions, fetchFills, type Portfolio, type ReadCreds, type OpenPosition, type Fill, type Side } from "./lib/trade";
+import { setupMandateTrading, mandatePerplAccountId, openPosition, closePosition, fetchPortfolio, fetchPositions, fetchFills, type Portfolio, type OpenPosition, type Fill, type Side } from "./lib/trade";
 import { readTerms, proposeTrade, recentDecisions, deployMandate, pauseAgent, resumeAgent, updateTerms, type Decision } from "./lib/mandate";
 import { PERPL, rawToUsd } from "./lib/perpl";
 
@@ -142,7 +142,6 @@ export default function App() {
   const [mandateMsg, setMandateMsg] = useState<{ tone: MsgTone; text: string } | null>(null);
   const [decisions, setDecisions] = useState<Decision[]>([]);
   const [stats, setStats] = useState<{ total: number; acted: number; abstained: number; peakLeverageX: number; peakSlippagePct: number } | null>(null);
-  const [creds, setCreds] = useState<ReadCreds | null>(null);
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
   const [positions, setPositions] = useState<OpenPosition[]>([]);
   const [fills, setFills] = useState<Fill[]>([]);
@@ -207,39 +206,31 @@ export default function App() {
     if (!wallet) return;
     readTerms().then((t) => { setTerms(t); setTradeLev(String(t.maxLeverageX)); }).catch(() => {});
     loadActivity();
-    // Returning user: if the wallet already has a Perpl account, mark trading ready and load it.
-    (async () => {
-      try {
-        if ((await exchangeAccountId(wallet.address)) === 0n) return;
-        setAccountReady(true);
-        const c = await enrollReadKey(wallet);
-        setCreds(c);
-        setPortfolio(await fetchPortfolio(c));
-        setPositions(await fetchPositions(c));
-        setFills(await fetchFills(c));
-      } catch {
-        /* best-effort; the Set up trading account button remains as fallback */
-      }
-    })();
   }, [wallet, loadActivity]);
+
+  const syncTrading = useCallback(async (mandate: string | null) => {
+    if (!wallet) return;
+    await refreshBalance(wallet);
+    if (mandate) {
+      const m = mandate as `0x${string}`;
+      setPortfolio(await fetchPortfolio(m));
+      setPositions(await fetchPositions(m));
+      setFills(await fetchFills(m));
+    }
+  }, [wallet, refreshBalance]);
 
   const refreshAll = useCallback(async () => {
     if (!wallet) return;
     setRefreshing(true);
     try {
-      await refreshBalance(wallet);
       await loadActivity();
-      if (creds) {
-        setPortfolio(await fetchPortfolio(creds));
-        setPositions(await fetchPositions(creds));
-        setFills(await fetchFills(creds));
-      }
+      await syncTrading(myMandate);
     } catch {
       /* pull-to-refresh is best-effort */
     } finally {
       setRefreshing(false);
     }
-  }, [wallet, creds, refreshBalance, loadActivity]);
+  }, [wallet, myMandate, loadActivity, syncTrading]);
 
   const propose = (leverageBps: number) => async () => {
     setBusy(true);
@@ -309,54 +300,60 @@ export default function App() {
       setStatus("Limits updated on-chain.");
     });
 
+  // Deploy the user's own mandate if they don't have one, then fund it and open its Perpl account. The
+  // mandate custodies the collateral and holds the account, so every trade is bounds-checked on-chain.
   const setupTrading = () =>
-    run("Opening your Perpl account", async () => {
+    run("Setting up your mandate for trading", async () => {
       if (!wallet) return;
-      await ensureExchangeAccount(wallet);
+      let mandate = myMandate;
+      if (!mandate) {
+        setStatus("Deploying your mandate…");
+        mandate = await deployMandate(wallet, {
+          maxLeverageBps: Math.round(parseFloat(myLev) * 10000),
+          maxSlippageBps: Math.round(parseFloat(mySlip) * 100),
+          drawdownTriggerBps: Math.round(parseFloat(myDd) * 100),
+        });
+        setMyMandate(mandate);
+        setOwnsMandate(true);
+        setAgentPaused(false);
+        setTerms(await readTerms());
+      }
+      setStatus("Funding the mandate and opening its Perpl account…");
+      await setupMandateTrading(wallet, mandate as `0x${string}`);
       setAccountReady(true);
-      const c = await enrollReadKey(wallet);
-      setCreds(c);
-      setPortfolio(await fetchPortfolio(c));
-      setPositions(await fetchPositions(c));
-      setFills(await fetchFills(c));
-      setStatus("Trading account ready.");
+      await syncTrading(mandate);
+      setStatus("Your mandate holds a Perpl account. Trading is live.");
     });
-
-  const syncTrading = async (c: ReadCreds | null) => {
-    if (!wallet) return;
-    await refreshBalance(wallet);
-    if (c) {
-      setPortfolio(await fetchPortfolio(c));
-      setPositions(await fetchPositions(c));
-      setFills(await fetchFills(c));
-    }
-  };
 
   const trade = () =>
     run(`Opening ${market} ${side} on Perpl`, async () => {
-      if (!wallet) return;
+      if (!wallet || !myMandate) return;
       setTradeMsg(null);
       const leverageX = Number(tradeLev);
-      // Gate on the on-chain mandate first: it authorizes (or refuses) before any funds move. A trade
-      // above your leverage cap is refused by the contract, so no order is ever placed out of bounds.
-      const check = await proposeTrade(Math.round(leverageX * 10000), ownsMandate ? wallet.address : undefined);
-      if (!check.allowed) {
-        const why = check.reason === "LeverageExceeded" ? `${leverageX}× exceeds your ${terms?.maxLeverageX}× cap` : check.reason;
-        setTradeMsg({ tone: "refused", text: `${why}. The mandate refused on-chain. No trade placed.` });
-        setStatus(`Refused on-chain: ${why}. No trade placed.`);
-        return;
+      try {
+        // The mandate caps leverage on-chain: an out-of-bounds order reverts in the contract before
+        // any funds move. We surface that as the refusal, so nothing out of bounds is ever placed.
+        const tx = await openPosition(wallet, { mandate: myMandate as `0x${string}`, marketId: PERPL.marketIds[market], side, notionalUsd: Number(amount), leverageHdths: Math.round(leverageX * 100) });
+        setStatus(`${market} ${side} opened at ${leverageX}× (custodied by your mandate) · tx ` + tx.slice(0, 10) + "…");
+        await syncTrading(myMandate);
+      } catch (e: any) {
+        const name = e?.walk?.((x: any) => x?.name === "ContractFunctionRevertedError")?.data?.errorName;
+        if (name === "LeverageExceeded") {
+          const why = `${leverageX}× exceeds your ${terms?.maxLeverageX}× cap`;
+          setTradeMsg({ tone: "refused", text: `${why}. The mandate refused on-chain. No trade placed.` });
+          setStatus(`Refused on-chain: ${why}. No trade placed.`);
+          return;
+        }
+        throw e;
       }
-      const tx = await openPosition(wallet, { marketId: PERPL.marketIds[market], side, notionalUsd: Number(amount), leverageHdths: Math.round(leverageX * 100) });
-      setStatus(`${market} ${side} opened at ${leverageX}× (within mandate) · tx ` + tx.slice(0, 10) + "…");
-      await syncTrading(creds);
     });
 
   const close = (p: OpenPosition) =>
     run(`Closing ${p.symbol} ${p.side} on Perpl`, async () => {
-      if (!wallet) return;
-      const tx = await closePosition(wallet, { marketId: p.marketId, side: p.side, sizeScaled: p.sizeScaled });
+      if (!wallet || !myMandate) return;
+      const tx = await closePosition(wallet, { mandate: myMandate as `0x${string}`, marketId: p.marketId, side: p.side, sizeScaled: p.sizeScaled });
       setStatus(`Position closed · tx ` + tx.slice(0, 10) + "…");
-      await syncTrading(creds);
+      await syncTrading(myMandate);
     });
 
   const funded = balance != null && Number(balance) >= MIN_AUSD;
@@ -633,12 +630,12 @@ export default function App() {
                 <Text style={styles.cardTitle}>Trade on Perpl</Text>
                 {!accountReady && !funded && (
                   <Text style={styles.warn}>
-                    Fund at least {MIN_AUSD} AUSD to this address (testnet.perpl.xyz) to open a trading account.
+                    Fund at least {MIN_AUSD} AUSD to this address, then set up - it deploys your mandate and opens its Perpl account.
                   </Text>
                 )}
                 <Text selectable style={styles.mono}>{wallet.address}</Text>
                 {!accountReady && (
-                  <Button label="Set up trading account" onPress={setupTrading} disabled={busy || !funded} />
+                  <Button label="Deploy & fund mandate" onPress={setupTrading} disabled={busy || !funded} />
                 )}
                 {accountReady && (
                   <>
@@ -655,7 +652,7 @@ export default function App() {
                     </View>
                     <Field label="Notional (USD)" value={amount} onChange={setAmount} />
                     <Field label={`Leverage (×) · max ${terms ? terms.maxLeverageX : "?"}×`} value={tradeLev} onChange={setTradeLev} />
-                    <Text style={styles.bodyFaint}>Every order is checked against your on-chain mandate before it is placed.</Text>
+                    <Text style={styles.bodyFaint}>Your mandate holds the Perpl account and caps leverage on-chain - an order above your limit reverts before any funds move.</Text>
                   </>
                 )}
                 <Button label={`Open ${market} ${side}`} onPress={trade} disabled={busy || !accountReady || !(Number(amount) > 0) || !(Number(tradeLev) > 0)} variant={accountReady ? "primary" : "ghost"} />
@@ -680,16 +677,16 @@ export default function App() {
               {portfolio && (
                 <View style={styles.card}>
                   <Text style={styles.cardTitle}>Portfolio</Text>
+                  <Text style={styles.bodyFaint}>Custodied by your mandate, read on-chain.</Text>
                   <Text style={styles.heroValue}>
                     {portfolio.accountValue.toFixed(2)} <Text style={styles.heroUnit}>AUSD</Text>
                   </Text>
                   <View style={styles.metricRow}>
                     <Metric
-                      value={`${portfolio.realizedPnl >= 0 ? "+" : ""}${portfolio.realizedPnl.toFixed(2)}`}
-                      label="REALIZED PNL"
-                      tone={portfolio.realizedPnl >= 0 ? "pos" : "neg"}
+                      value={`${portfolio.unrealizedPnl >= 0 ? "+" : ""}${portfolio.unrealizedPnl.toFixed(2)}`}
+                      label="UNREALIZED PNL"
+                      tone={portfolio.unrealizedPnl >= 0 ? "pos" : "neg"}
                     />
-                    <Metric value={portfolio.volume.toFixed(0)} label="VOLUME" divider />
                     <Metric value={`${portfolio.openPositions}`} label="OPEN" divider />
                   </View>
                 </View>

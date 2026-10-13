@@ -58,7 +58,7 @@ contract Mandate {
     address public constant PERPL_EXCHANGE = 0x1964C32f0bE608E7D29302AFF5E61268E72080cc;
     IERC20 public constant PERPL_COLLATERAL = IERC20(0xa9012a055bd4e0eDfF8Ce09f960291C09D5322dC);
 
-    event PerplOrderPlaced(uint256 indexed seq, uint8 orderType, uint256 perpId, uint256 lotLNS, uint256 leverageBps);
+    event PerplOrderPlaced(uint256 indexed seq, uint8 orderType, uint256 perpId, uint256 pricePNS, uint256 lotLNS, uint256 leverageBps);
 
     event AgentSet(address indexed agent);
     event VenueSet(address indexed venue, bool allowed);
@@ -240,7 +240,7 @@ contract Mandate {
 
         seq = ++decisionCount;
         emit Decision(seq, Action.Rebalance, PERPL_EXCHANGE, true, leverageBps, maxNegPnlCollatBPS, "");
-        emit PerplOrderPlaced(seq, orderType, perpId, lotLNS, leverageBps);
+        emit PerplOrderPlaced(seq, orderType, perpId, pricePNS, lotLNS, leverageBps);
     }
 
     function balanceOfToken(IERC20 token) external view returns (uint256) {
