@@ -1,0 +1,11 @@
+node_modules
+.next
+out
+next-env.d.ts
+*.tsbuildinfo
+.vercel
+.env*.local
+
+# APK served from public/ — host the binary, keep it out of git (repo policy: *.apk on Releases).
+# Vercel CLI still uploads it at deploy. For git-integration deploys, provide the file another way.
+public/*.apk
