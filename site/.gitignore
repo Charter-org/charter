@@ -6,6 +6,6 @@ next-env.d.ts
 .vercel
 .env*.local
 
-# APK served from public/ — host the binary, keep it out of git (repo policy: *.apk on Releases).
-# Vercel CLI still uploads it at deploy. For git-integration deploys, provide the file another way.
-public/*.apk
+# The served APK is tracked via Git LFS (see .gitattributes) so GitHub->Vercel deploys ship it.
+# Root .gitignore has a global *.apk; re-include just this one file.
+!public/charter-android.apk
