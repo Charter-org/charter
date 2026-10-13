@@ -4,10 +4,36 @@ pragma solidity ^0.8.24;
 import {IERC20} from "./interfaces/IERC20.sol";
 import {IPriceSource} from "./interfaces/IPriceSource.sol";
 
+/// @notice Perpl exchange order (OrderDesc). Field order/types match the live execOrder ABI exactly.
+struct PerplOrder {
+    uint256 orderDescId;
+    uint256 perpId;
+    uint8 orderType; // 0 OpenLong, 1 OpenShort, 2 CloseLong, 3 CloseShort
+    uint256 orderId;
+    uint256 pricePNS;
+    uint256 lotLNS;
+    uint256 expiryBlock;
+    bool postOnly;
+    bool fillOrKill;
+    bool immediateOrCancel;
+    uint256 maxMatches;
+    uint256 leverageHdths; // leverage x100 (200 = 2.00x)
+    uint256 lastExecutionBlock;
+    uint256 amountCNS;
+    uint256 maxNegPnlCollatBPS;
+}
+
+interface IPerplExchange {
+    function createAccount(uint256 amountCNS) external returns (uint256 accountId);
+    function execOrder(PerplOrder calldata order) external;
+    function withdrawCollateral(uint256 amountCNS) external;
+}
+
 /// @title Mandate
 /// @notice Risk bounds the agent cannot exceed. The owner sets terms and custodies capital here; the
-/// agent can only move it through executeSwap, which reverts if the realized fill breaches the
-/// slippage floor. Perpl orders are relayed off-chain, so that leg is logged via `act`, not custodied.
+/// agent can only move it through executeSwap (spot) or execPerplOrder (perps), both of which the
+/// contract bounds-checks. The mandate holds the Perpl account itself, so a compromised agent cannot
+/// over-lever: execPerplOrder reverts before the order is sent if leverage exceeds the owner's terms.
 contract Mandate {
     uint256 internal constant BPS = 10_000;
 
@@ -27,6 +53,12 @@ contract Mandate {
     uint256 public decisionCount;
 
     uint256 private _lock = 1;
+
+    // Perpl on Monad testnet: the mandate custodies AUSD here and holds its own Perpl account.
+    address public constant PERPL_EXCHANGE = 0x1964C32f0bE608E7D29302AFF5E61268E72080cc;
+    IERC20 public constant PERPL_COLLATERAL = IERC20(0xa9012a055bd4e0eDfF8Ce09f960291C09D5322dC);
+
+    event PerplOrderPlaced(uint256 indexed seq, uint8 orderType, uint256 perpId, uint256 lotLNS, uint256 leverageBps);
 
     event AgentSet(address indexed agent);
     event VenueSet(address indexed venue, bool allowed);
@@ -160,6 +192,55 @@ contract Mandate {
     function abstain(string calldata reason) external onlyAgent returns (uint256 seq) {
         seq = ++decisionCount;
         emit Decision(seq, Action.Abstain, address(0), false, 0, 0, reason);
+    }
+
+    /// @notice Open the mandate's own Perpl account, funded by the AUSD it already custodies. Owner only.
+    function openPerplAccount(uint256 amountCNS) external onlyOwner returns (uint256 accountId) {
+        PERPL_COLLATERAL.approve(PERPL_EXCHANGE, amountCNS);
+        accountId = IPerplExchange(PERPL_EXCHANGE).createAccount(amountCNS);
+    }
+
+    /// @notice Pull collateral back out of the Perpl account into the mandate (owner can then withdraw).
+    function withdrawPerplCollateral(uint256 amountCNS) external onlyOwner {
+        IPerplExchange(PERPL_EXCHANGE).withdrawCollateral(amountCNS);
+    }
+
+    /// @notice The agent places a Perpl order through the mandate. Leverage is hard-capped on-chain:
+    /// the contract reverts if it exceeds the owner's terms, so a compromised agent cannot over-lever.
+    /// The mandate is the Perpl account holder, so the position is custodied here, not in any EOA.
+    function execPerplOrder(
+        uint8 orderType,
+        uint256 perpId,
+        uint256 pricePNS,
+        uint256 lotLNS,
+        uint256 leverageHdths,
+        uint256 maxNegPnlCollatBPS
+    ) external onlyAgent nonReentrant returns (uint256 seq) {
+        uint256 leverageBps = leverageHdths * 100; // leverageHdths is x100; terms.maxLeverageBps is x10_000
+        if (leverageBps > terms.maxLeverageBps) revert LeverageExceeded(leverageBps, terms.maxLeverageBps);
+
+        PerplOrder memory order = PerplOrder({
+            orderDescId: block.timestamp * 1000,
+            perpId: perpId,
+            orderType: orderType,
+            orderId: 0,
+            pricePNS: pricePNS,
+            lotLNS: lotLNS,
+            expiryBlock: 0,
+            postOnly: false,
+            fillOrKill: false,
+            immediateOrCancel: true,
+            maxMatches: 0,
+            leverageHdths: leverageHdths,
+            lastExecutionBlock: 0,
+            amountCNS: 0,
+            maxNegPnlCollatBPS: maxNegPnlCollatBPS
+        });
+        IPerplExchange(PERPL_EXCHANGE).execOrder(order);
+
+        seq = ++decisionCount;
+        emit Decision(seq, Action.Rebalance, PERPL_EXCHANGE, true, leverageBps, maxNegPnlCollatBPS, "");
+        emit PerplOrderPlaced(seq, orderType, perpId, lotLNS, leverageBps);
     }
 
     function balanceOfToken(IERC20 token) external view returns (uint256) {
