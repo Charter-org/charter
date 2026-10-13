@@ -28,3 +28,9 @@ broadcast/
 web-build/
 app/ios/
 app/android/
+
+# APK artifacts (host on GitHub Releases, not git)
+*.apk
+
+# Local UI-reference screenshots (not app assets — those live in app/assets/)
+/assets/

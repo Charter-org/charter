@@ -1,4 +1,4 @@
-// Perpl testnet client — portable across Node and React Native (no node:crypto).
+// Perpl testnet client - portable across Node and React Native (no node:crypto).
 // Constants verified 2026-10-07 against the live GET /api/v1/pub/context. Source of truth: config/monad.ts.
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { sha256 } from "@noble/hashes/sha2.js";

@@ -11,8 +11,13 @@ the Perpl collateral on Monad testnet.
 - **viem** — AUSD `balanceOf`, EIP-712 signing, and the exchange `createAccount` tx. `lib/tokens.ts`.
 - **Perpl** — orders are on-chain `execOrder` txs signed by the wallet (the gasless WS relay is
   disabled on testnet → `OrderForwardingNotAllowed`). `lib/trade.ts`. The Ed25519 API key + WS
-  (`lib/perpl.ts`) are the read path. Constants verified against the live `GET /api/v1/pub/context`;
-  the `execOrder` call was proven end-to-end (tx `0x43e4f968…`, account #981 margin locked).
+  (`lib/perpl.ts`) are the read path. Constants verified against the live `GET /api/v1/pub/context`.
+  All four actions proven end-to-end on BTC against the live positions API (`orderType` 0/1/2/3,
+  account #981): open long `0x6c5b42ed…`, open short `0xc8a55807…`, close long `0x4640482a…`,
+  close short `0x15fb88b7…`. A market order is an IOC with the limit priced through the book
+  (buy above ask, sell below bid); `maxNegPnlCollatBps` is the slippage guard. Position size is a USD
+  notional converted per the market's `price_decimals`/`size_decimals`, verified across markets
+  (ETH long `0xee527fb3…`, MON short `0x591d7971…`).
 
 ## Verify the non-UI paths headlessly
 
@@ -43,5 +48,6 @@ bun run ios           # or: bun run android   (simulator/emulator or device)
 
 ## Flow
 
-Sign in → derive account → show live AUSD balance → (once funded) `createAccount` → open a BTC perp
-long via an on-chain `execOrder` tx. Each step is a real on-chain / live-API call; nothing is mocked.
+Sign in → derive account → show live AUSD balance → (once funded) `createAccount` → open or close a
+long or short on any Perpl market (BTC/ETH/SOL/MON/ZEC), sized by USD notional, via an on-chain
+`execOrder` tx. Each step is a real on-chain / live-API call; nothing is mocked.

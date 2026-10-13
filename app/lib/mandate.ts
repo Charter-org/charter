@@ -1,4 +1,4 @@
-// The on-chain Mandate — the "guarantee". An autonomous agent operates under it; the contract reverts
+// The on-chain Mandate - the "guarantee". An autonomous agent operates under it; the contract reverts
 // if a proposed trade breaches the owner's bounds. The agent's live decisions (from the keeper) are a
 // public Decision-event log, and we SIMULATE a proposal (gas-free eth_call from the mandate's agent)
 // to show enforcement. Same mandate the keeper writes to (see deployments/monad-testnet.json).
@@ -8,7 +8,7 @@ import { MANDATE_BYTECODE } from "./mandateBytecode";
 import type { Wallet } from "./wallet";
 
 // The shared demo mandate the keeper writes to. A user can deploy their OWN (deployMandate) and the
-// app then points at theirs (setMandate) — refusal demo, feed, and agent all follow the active one.
+// app then points at theirs (setMandate) - refusal demo, feed, and agent all follow the active one.
 const DEFAULT_MANDATE = "0x564EFe00cfF81eaF6A65422758C27A0c89EAA648";
 let active = DEFAULT_MANDATE;
 export const currentMandate = () => active;
@@ -116,8 +116,8 @@ export interface MandateResult {
  * The agent (the automated trader the mandate governs) proposes a trade at `leverageBps`, checked by
  * the on-chain mandate (gas-free eth_call). Within bounds → allowed; out of bounds → the contract
  * reverts and we surface the reason. Real contract logic, not a client-side check.
- * `from` is the proposer identity: pass the owner's address for a mandate they own (so a paused agent —
- * agent set to 0 — reverts NotAgent instead of passing); defaults to the mandate's live agent (spine).
+ * `from` is the proposer identity: pass the owner's address for a mandate they own (so a paused agent -
+ * agent set to 0 - reverts NotAgent instead of passing); defaults to the mandate's live agent (spine).
  */
 export async function proposeTrade(leverageBps: number, from?: `0x${string}`): Promise<MandateResult> {
   try {
@@ -130,11 +130,12 @@ export async function proposeTrade(leverageBps: number, from?: `0x${string}`): P
     });
     return { allowed: true };
   } catch (e: any) {
+    // viem decodes the custom error onto the revert cause; read its name directly (shortMessage omits it).
+    const revert = typeof e?.walk === "function" ? e.walk((err: any) => err?.name === "ContractFunctionRevertedError") : e?.cause;
+    const name = revert?.data?.errorName as string | undefined;
     const msg = String(e?.shortMessage ?? e?.message ?? e);
-    const reason = ["LeverageExceeded", "SlippageExceeded", "VenueNotAllowed", "NotAgent"].find((n) =>
-      msg.includes(n),
-    );
-    return { allowed: false, reason: reason ?? "reverted" };
+    const reason = name ?? ["LeverageExceeded", "SlippageExceeded", "VenueNotAllowed", "NotAgent"].find((n) => msg.includes(n)) ?? "reverted";
+    return { allowed: false, reason };
   }
 }
 

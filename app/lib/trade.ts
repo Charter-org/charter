@@ -1,11 +1,11 @@
-// Real Perpl trade flow (Monad testnet). Orders are submitted ON-CHAIN via execOrder — the gasless
+// Real Perpl trade flow (Monad testnet). Orders are submitted ON-CHAIN via execOrder - the gasless
 // WS relay is disabled on testnet (returns sr:34 OrderForwardingNotAllowed), so the wallet signs each
 // order tx itself. Verified end-to-end against a successful UI trade (tx 0x3a6d5fe0…) and a replayed
 // order from our stack (tx 0x43e4f968…): account #981 balance moved, margin locked.
-//   1. ensureExchangeAccount — approve AUSD + createAccount(amount) (one-time)
-//   2. openLong              — execOrder(...) on the exchange
+//   1. ensureExchangeAccount         - approve AUSD + createAccount(amount) (one-time)
+//   2. openPosition / closePosition  - execOrder(...) long or short, open or flatten
 // enroll()/signTypedFor are the authenticated-read path (Ed25519 API key); not needed to trade.
-import { parseAbi, hashTypedData } from "viem";
+import { parseAbi, hashTypedData, encodeFunctionData } from "viem";
 import { PERPL, enrollApiKey, signedFetch, getContext, type SignTyped, type EnrollResult } from "./perpl";
 import { publicClient } from "./tokens";
 import type { Wallet } from "./wallet";
@@ -32,8 +32,22 @@ export function signTypedFor(wallet: Wallet): SignTyped {
   };
 }
 
-/** One-time: approve AUSD to the exchange and open the on-chain account with collateral. */
+/** The wallet's Perpl account id, or 0n if it has none (getAccountByAddr reverts for a missing account). */
+export async function exchangeAccountId(address: `0x${string}`): Promise<bigint> {
+  const data = encodeFunctionData({ abi: parseAbi(["function getAccountByAddr(address)"]), functionName: "getAccountByAddr", args: [address] });
+  try {
+    const res = await publicClient.call({ to: PERPL.exchange as `0x${string}`, data });
+    return res.data && res.data.length >= 66 ? BigInt(res.data.slice(0, 66)) : 0n;
+  } catch {
+    return 0n;
+  }
+}
+
+/** One-time: approve AUSD and open the on-chain account. Idempotent - returns early if the wallet
+ *  already has an account (createAccount reverts for an existing one). */
 export async function ensureExchangeAccount(wallet: Wallet, amountRaw = PERPL.minAccountOpen) {
+  if ((await exchangeAccountId(wallet.address)) > 0n) return; // already set up
+
   const exchange = PERPL.exchange as `0x${string}`;
   const collateral = PERPL.collateral as `0x${string}`;
 
@@ -57,33 +71,66 @@ export async function ensureExchangeAccount(wallet: Wallet, amountRaw = PERPL.mi
   return createTx;
 }
 
-/** Current oracle price (`orl`, scaled by the market's price_decimals) from the public context. */
-export async function oraclePrice(marketId: number): Promise<number> {
+/** Live oracle + top-of-book + scaling for a market (prices in price_decimals, sizes in size_decimals). */
+export async function marketPrices(marketId: number): Promise<{ orl: number; bid: number; ask: number; priceDecimals: number; sizeDecimals: number }> {
   const ctx = await getContext();
   const m = (ctx.markets ?? []).find((x: any) => x.id === marketId);
-  if (!m?.state?.orl) throw new Error(`no oracle price for market ${marketId}`);
-  return m.state.orl;
+  const s = m?.state;
+  if (!s?.orl) throw new Error(`no market state for ${marketId}`);
+  return { orl: s.orl, bid: s.bid ?? s.orl, ask: s.ask ?? s.orl, priceDecimals: m.config?.price_decimals ?? 0, sizeDecimals: m.config?.size_decimals ?? 0 };
 }
 
-// execOrder struct, replicated from the verified UI long. Fields proven variable: [0]=time(ms),
-// [4]=oracle price, [5]=size. The rest are copied from the known-good long.
-// ponytail: only the long side is sampled (side byte = 0); short + custom leverage need another
-// reference tx before parameterizing [2]/[11].
+// execOrder OrderDesc layout (names from Perpl's on-chain ABI; every field proven against live BTC
+// fills - captured refs in README): [0] clientId, [1] perpId, [2] orderType, [3] orderId, [4] price,
+// [5] size, [6] expiryBlock, [7] postOnly, [8] fillOrKill, [9] IOC, [10] maxMatches,
+// [11] leverageHdths (x100, so 1500 = 15x), [12] lastExecBlock, [13] amountCNS, [14] maxNegPnlCollatBps.
 export type ExecOrder = readonly [bigint, bigint, number, bigint, bigint, bigint, bigint, boolean, boolean, boolean, bigint, bigint, bigint, bigint, bigint];
+export type Side = "long" | "short";
+// orderType enum: OpenLong 0, OpenShort 1, CloseLong 2, CloseShort 3 (Cancel 4, Change 6).
+const ORDER_TYPE = { openLong: 0, openShort: 1, closeLong: 2, closeShort: 3 } as const;
 
-export function buildLong(marketId: number, oracle: number, sizeScaled: number, maxSlippageBps = 1000): ExecOrder {
-  return [BigInt(Date.now()), BigInt(marketId), 0, 0n, BigInt(oracle), BigInt(sizeScaled), 0n, false, false, false, 0n, 1500n, 0n, 0n, BigInt(maxSlippageBps)];
+function buildOrder(marketId: number, orderType: number, priceScaled: number, sizeScaled: number, leverageHdths = 1500, maxNegPnlBps = 1000): ExecOrder {
+  // IOC (field [9]) makes it a market order: fill what crosses now, never rest on the book.
+  return [BigInt(Date.now()), BigInt(marketId), orderType, 0n, BigInt(priceScaled), BigInt(sizeScaled), 0n, false, false, true, 0n, BigInt(leverageHdths), 0n, 0n, BigInt(maxNegPnlBps)];
 }
 
-/** Open a long on `marketId` for `sizeScaled` (market's size_decimals). Submits execOrder on-chain. */
-export async function openLong(wallet: Wallet, opts: { marketId: number; sizeScaled: number; maxSlippageBps?: number }) {
-  const order = buildLong(opts.marketId, await oraclePrice(opts.marketId), opts.sizeScaled, opts.maxSlippageBps ?? 1000);
+/** A price that crosses the book now: a buy pays through the ask, a sell hits through the bid. The
+ *  band only guarantees a taker fill - maxNegPnlCollatBps is the real slippage guard. */
+function marketable(isBuy: boolean, book: { bid: number; ask: number }, bufferBps = 200): number {
+  const base = isBuy ? book.ask : book.bid;
+  return Math.round(base * (isBuy ? 1 + bufferBps / 10000 : 1 - bufferBps / 10000));
+}
+
+async function submitOrder(wallet: Wallet, order: ExecOrder) {
   const tx = await wallet.client.writeContract({
     address: PERPL.exchange as `0x${string}`, abi: exchangeAbi, functionName: "execOrder",
     args: [order], account: wallet.account, chain: wallet.client.chain,
   });
   await publicClient.waitForTransactionReceipt({ hash: tx });
   return tx;
+}
+
+// notionalUsd = (sizeScaled / 10^sizeDecimals) * (orl / 10^priceDecimals), so invert for the raw size.
+function sizeFromNotional(notionalUsd: number, book: { orl: number; priceDecimals: number; sizeDecimals: number }): number {
+  return Math.round((notionalUsd * 10 ** book.sizeDecimals * 10 ** book.priceDecimals) / book.orl);
+}
+
+/** Open a long or short on `marketId` sized by USD notional (converted per the market's decimals). */
+export async function openPosition(wallet: Wallet, opts: { marketId: number; side: Side; notionalUsd: number; leverageHdths?: number }) {
+  const isBuy = opts.side === "long";
+  const book = await marketPrices(opts.marketId);
+  const sizeScaled = sizeFromNotional(opts.notionalUsd, book);
+  if (sizeScaled <= 0) throw new Error(`notional ${opts.notionalUsd} too small for this market`);
+  const type = isBuy ? ORDER_TYPE.openLong : ORDER_TYPE.openShort;
+  return submitOrder(wallet, buildOrder(opts.marketId, type, marketable(isBuy, book), sizeScaled, opts.leverageHdths ?? 1500));
+}
+
+/** Flatten an open position - closing a long sells, closing a short buys. On-chain execOrder. */
+export async function closePosition(wallet: Wallet, opts: { marketId: number; side: Side; sizeScaled: number }) {
+  const isBuy = opts.side === "short"; // buying back to close a short
+  const price = marketable(isBuy, await marketPrices(opts.marketId));
+  const type = opts.side === "long" ? ORDER_TYPE.closeLong : ORDER_TYPE.closeShort;
+  return submitOrder(wallet, buildOrder(opts.marketId, type, price, opts.sizeScaled));
 }
 
 /** Wallet-signed Ed25519 API-key enrollment (authenticated reads: account, positions, fills). */
@@ -110,6 +157,70 @@ export interface Portfolio {
   realizedPnl: number; // AUSD
   volume: number; // AUSD traded
   openPositions: number;
+}
+
+export interface OpenPosition {
+  marketId: number;
+  symbol: string;
+  side: Side;
+  sizeScaled: number;  // raw size as submitted on-chain (used to close)
+  size: number;        // human size (e.g. 0.0001 BTC)
+  entryUsd: number;    // human entry price
+  notionalUsd: number; // size * entryUsd
+}
+
+/** Open positions from Perpl's authenticated REST, joined with market decimals. sd: 1 long, 2 short. */
+export async function fetchPositions(creds: ReadCreds): Promise<OpenPosition[]> {
+  const [p, ctx] = await Promise.all([
+    signedFetch(creds, "GET", "/v1/trading/positions").then((r) => r.json()),
+    getContext(),
+  ]);
+  const byId = new Map<number, any>((ctx.markets ?? []).map((m: any) => [m.id, m]));
+  return (p.d ?? []).map((x: any) => {
+    const m = byId.get(x.mkt);
+    const size = x.s / 10 ** (m?.config?.size_decimals ?? 0);
+    const entryUsd = x.ep / 10 ** (m?.config?.price_decimals ?? 0);
+    return { marketId: x.mkt, symbol: m?.symbol ?? String(x.mkt), side: x.sd === 2 ? "short" : "long", sizeScaled: x.s, size, entryUsd, notionalUsd: size * entryUsd };
+  });
+}
+
+export interface Fill {
+  marketId: number;
+  symbol: string;
+  action: "Opened" | "Closed";
+  side: Side;
+  size: number;
+  priceUsd: number;
+  timeMs: number;
+  txid: string;
+}
+
+// Fill `t` is the on-chain orderType + 1: 1 OpenLong, 2 OpenShort, 3 CloseLong, 4 CloseShort
+// (verified against known capture txs).
+const fillMeta = (t: number): { action: "Opened" | "Closed"; side: Side } => ({
+  action: t <= 2 ? "Opened" : "Closed",
+  side: t === 1 || t === 3 ? "long" : "short",
+});
+
+/** The account's recent on-chain fills (GET /v1/trading/fills), joined with market decimals. */
+export async function fetchFills(creds: ReadCreds, limit = 12): Promise<Fill[]> {
+  const [res, ctx] = await Promise.all([
+    signedFetch(creds, "GET", "/v1/trading/fills").then((r) => r.json()),
+    getContext(),
+  ]);
+  const byId = new Map<number, any>((ctx.markets ?? []).map((m: any) => [m.id, m]));
+  return (res.d ?? []).slice(0, limit).map((f: any) => {
+    const m = byId.get(f.mkt);
+    return {
+      marketId: f.mkt,
+      symbol: m?.symbol ?? String(f.mkt),
+      ...fillMeta(f.t),
+      size: f.s / 10 ** (m?.config?.size_decimals ?? 0),
+      priceUsd: f.p / 10 ** (m?.config?.price_decimals ?? 0),
+      timeMs: f.at?.t ?? 0,
+      txid: f.at?.txid ?? "",
+    };
+  });
 }
 
 /** Live portfolio from Perpl's authenticated REST (GET /v1/trading/wallet + /positions). */
